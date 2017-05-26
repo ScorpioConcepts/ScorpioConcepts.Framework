@@ -1,0 +1,56 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 2013
+VisualStudioVersion = 12.0.31101.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ScorpioConcepts.Framework.PlugIn", "ScorpioConcepts.Framework.PlugIn\ScorpioConcepts.Framework.PlugIn.csproj", "{F1C8CE35-864C-403C-8308-12B5146633BD}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ScorpioConcepts.Framework.LogServer", "ScorpioConcepts.Framework.LogServer\ScorpioConcepts.Framework.LogServer.csproj", "{64A6115F-FC1F-4601-818D-3CAFEE4F549B}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ScorpioConcepts.Framework.DBSchema", "ScorpioConcepts.Framework.DBSchema\ScorpioConcepts.Framework.DBSchema.csproj", "{59F7E04C-3D29-4EE1-9CA3-21F3E693B0B0}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ScorpioConcepts.Framework.netNUTClient", "ScorpioConcepts.Framework.netNUTClient\ScorpioConcepts.Framework.netNUTClient.csproj", "{C2DA85E2-9A1A-4148-A092-1DA7ACEDCC14}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Debug|x86 = Debug|x86
+		Release|Any CPU = Release|Any CPU
+		Release|x86 = Release|x86
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{F1C8CE35-864C-403C-8308-12B5146633BD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F1C8CE35-864C-403C-8308-12B5146633BD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F1C8CE35-864C-403C-8308-12B5146633BD}.Debug|x86.ActiveCfg = Debug|x86
+		{F1C8CE35-864C-403C-8308-12B5146633BD}.Debug|x86.Build.0 = Debug|x86
+		{F1C8CE35-864C-403C-8308-12B5146633BD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F1C8CE35-864C-403C-8308-12B5146633BD}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F1C8CE35-864C-403C-8308-12B5146633BD}.Release|x86.ActiveCfg = Release|x86
+		{F1C8CE35-864C-403C-8308-12B5146633BD}.Release|x86.Build.0 = Release|x86
+		{64A6115F-FC1F-4601-818D-3CAFEE4F549B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{64A6115F-FC1F-4601-818D-3CAFEE4F549B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{64A6115F-FC1F-4601-818D-3CAFEE4F549B}.Debug|x86.ActiveCfg = Debug|x86
+		{64A6115F-FC1F-4601-818D-3CAFEE4F549B}.Debug|x86.Build.0 = Debug|x86
+		{64A6115F-FC1F-4601-818D-3CAFEE4F549B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{64A6115F-FC1F-4601-818D-3CAFEE4F549B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{64A6115F-FC1F-4601-818D-3CAFEE4F549B}.Release|x86.ActiveCfg = Release|x86
+		{64A6115F-FC1F-4601-818D-3CAFEE4F549B}.Release|x86.Build.0 = Release|x86
+		{59F7E04C-3D29-4EE1-9CA3-21F3E693B0B0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{59F7E04C-3D29-4EE1-9CA3-21F3E693B0B0}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{59F7E04C-3D29-4EE1-9CA3-21F3E693B0B0}.Debug|x86.ActiveCfg = Debug|x86
+		{59F7E04C-3D29-4EE1-9CA3-21F3E693B0B0}.Debug|x86.Build.0 = Debug|x86
+		{59F7E04C-3D29-4EE1-9CA3-21F3E693B0B0}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{59F7E04C-3D29-4EE1-9CA3-21F3E693B0B0}.Release|Any CPU.Build.0 = Release|Any CPU
+		{59F7E04C-3D29-4EE1-9CA3-21F3E693B0B0}.Release|x86.ActiveCfg = Release|x86
+		{59F7E04C-3D29-4EE1-9CA3-21F3E693B0B0}.Release|x86.Build.0 = Release|x86
+		{C2DA85E2-9A1A-4148-A092-1DA7ACEDCC14}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C2DA85E2-9A1A-4148-A092-1DA7ACEDCC14}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C2DA85E2-9A1A-4148-A092-1DA7ACEDCC14}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{C2DA85E2-9A1A-4148-A092-1DA7ACEDCC14}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C2DA85E2-9A1A-4148-A092-1DA7ACEDCC14}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C2DA85E2-9A1A-4148-A092-1DA7ACEDCC14}.Release|x86.ActiveCfg = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal
