@@ -1,12 +1,12 @@
-#Log Server Library
+# Log Server Library
 
-##Overview
+## Overview
 This simple library creates a logging target to send anything you want to log to.
 It then creates a listening TCP port(default 446, but can be passed in as a parameter).
 Simply use your favourite telnet client to connect to the port, and you can watch a live log of what your 
 application is doing. Great for debugging things like Windows Services.
 
-##Simple Example
+## Simple Example
 ```csharp
 using ScorpioConcepts.Framework.LogServer;
 using System;
@@ -51,5 +51,5 @@ to wait for all clients to disconnect before terminating the program. _If you do
 software will still close, but it may happen that there is still a connection open from a client. If you
 were to start the software again immediately, the Logging Server may fail to start up due to this_
 
-##Conclusion
+## Conclusion
 The Log Server library make it quite simple to add remote real-time monitoring functionality to any .NET application. The example can be downloaded [here](http://www.geekhangar.co.za/ScorpioConcepts/framework/LoggingServerExample.zip)
