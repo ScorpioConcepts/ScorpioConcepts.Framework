@@ -6,9 +6,9 @@ using System.Runtime.InteropServices;
 // set of attributes. Change these attribute values to modify the information
 // associated with an assembly.
 [assembly: AssemblyTitle("ScorpioConcepts.Framework.LogServer")]
-[assembly: AssemblyDescription("")]
+[assembly: AssemblyDescription("Simple to use TCP enabled logging server")]
 [assembly: AssemblyConfiguration("")]
-[assembly: AssemblyCompany("Microsoft")]
+[assembly: AssemblyCompany("Scorpio Concepts")]
 [assembly: AssemblyProduct("ScorpioConcepts.Framework.LogServer")]
 [assembly: AssemblyCopyright("Copyright © Scorpio Concepts 2017")]
 [assembly: AssemblyTrademark("")]
