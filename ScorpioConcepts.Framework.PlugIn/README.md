@@ -1,20 +1,20 @@
-#Simple Plug In Library
+# Simple Plug In Library
 
-##Overview
+## Overview
 This is a library I wrote to facilitate the simple addition and management of Plug In functionality in my .NET projects. The basics are fairly simple. There are a bunch of interfaces that define the basic structure required for the plugins, and a base manager class which needs to be extended to manage a specific set of plugins.
 
-##Interfaces
-###IPlugInHost
+## Interfaces
+### IPlugInHost
 **IPlugInHost** defines the basics that a program needs to implement to host plugins. It only has 2 methods that need to be implemented that deal primarily with error handling for your plugins called _PlugInError_ and _ThrowException_. They allow a plugin to throw an Exception or send an Error Message to your hosting application without needing to know anything about the hosting applications error handling.
 
-###IPlugIn
+### IPlugIn
 **IPlugIn&lt;_PlugInHost_&gt;** is a generic interface. The _PlugInHost_ template class defines what interface/class is hosting the plugins. This can be as simple as using **IPlugInHost** directly if you don't need to make any additional host functionlity available to your plugins, or you can define a whole new interface/class inheriting from **IPlugInHost** to make a range of properties, methods and even fields available. Each instance of a plugin will then have a property called _Host_ of the class _PlugInHost_. This is also where you define the methods and properties that will be available to the host application via your plugins.
 
-###PlugInManager
+### PlugInManager
 **PlugInManager&lt;_PlugInType, PlugInHost_&gt;** is a generic base class. You can either subclass this if you want to add convenience functions like calling a method on all plugins, or you can simply create an instance for the basic functionality. This class has only one method **Find(_string directory_)**. This method scans the specified directory and finds all **.dll** files that implement **PlugInType**. It then creates an instance of all classes in the **.dll** file that implement **PlugInType**, calls their **.Inititialize()** method, and adds them to the **PlugIns** list of the manager.
 
-##Simple Example
-###ISamplePlugIn.cs
+## Simple Example
+### ISamplePlugIn.cs
 ```csharp
 using ScorpioConcepts.Framework.PlugIn;
 
@@ -28,7 +28,7 @@ namespace PlugInHost
 ```
 This is the basic plugin definition. In this case, we are creating an interface that specifies that these plugins will be hosted by a **IPlugInHost** host, and that all plugins must implement a method called **SayHello()**
 
-###Program.cs
+### Program.cs
 ```csharp
 using ScorpioConcepts.Framework.PlugIn;
 using System;
@@ -70,7 +70,7 @@ namespace PlugInHost
 ```
 This is a short console application called **PlugInHost**. It simply finds and loads all plugins in the same directory than itself, and asks all of them to say hello.
 
-###SamplePlugIn1.cs
+### SamplePlugIn1.cs
 ```csharp
 using PlugInHost;
 using ScorpioConcepts.Framework.PlugIn;
@@ -122,5 +122,5 @@ This is our sample plug in. This is a separate Class Library project called **Sa
 
 Also we implemented the **SayHello()** method required by our **ISamplePlugIn** interface. This function can now be called from the host application.
 
-##Conclusion
+## Conclusion
 The above example is very simplistic, but demonstrates the ease of adding plugin functionality to your applications. It can be downloaded [here](http://www.geekhangar.co.za/ScorpioConcepts/framework/PlugInExample.zip)
