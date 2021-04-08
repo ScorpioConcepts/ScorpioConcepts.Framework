@@ -3,7 +3,7 @@
   <PropertyGroup>
     <TargetFrameworks>net452;netstandard2.0;net5.0</TargetFrameworks>
     <PackageId>ScorpioConcepts.Framework.PlugIn</PackageId>
-    <Version>2.0.0</Version>
+    <Version>2.0.1</Version>
     <Title>Scorpio Concepts PlugIn Framework</Title>
     <Description>A framework to allow the simple integration of plugins into any .NET application</Description>
     <Authors>Scorpio Concepts</Authors>
@@ -11,7 +11,7 @@
     <PackageRequireLicenseAcceptance>False</PackageRequireLicenseAcceptance>
     <PackageProjectUrl>https://github.com/ScorpioConcepts/ScorpioConcepts.Framework</PackageProjectUrl>
     <PackageReleaseNotes>Release to support .NET 5</PackageReleaseNotes>
-    <PackageVersion>2.0.0</PackageVersion>
+    <PackageVersion>2.0.1</PackageVersion>
     <Copyright>Copyright Scorpio Concepts 2021</Copyright>
     <RepositoryType>git</RepositoryType>
     <RepositoryUrl>https://github.com/ScorpioConcepts/ScorpioConcepts.Framework.git</RepositoryUrl>
