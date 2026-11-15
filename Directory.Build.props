@@ -9,11 +9,19 @@
   <PropertyGroup>
     <TargetFrameworks>net10.0;netstandard2.0</TargetFrameworks>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- Newer C# also on netstandard2.0, e.g. for nullable annotations; features that need runtime support still fail to compile there -->
+    <LangVersion>latest</LangVersion>
     <!--
       The recommended analyzer rules. A library that has not been cleaned up yet overrides this in its
       csproj until its own PR fixes the warnings, so master never carries a pile of warnings.
     -->
     <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <!--
+      These rules suggest APIs that only exist in newer .NET (ArgumentNullException.ThrowIfNull,
+      string.StartsWith(char), the Memory<T> stream overloads, generic Enum methods). They fire only for the
+      net10.0 build, and following them would need #if around every call because netstandard2.0 lacks the APIs.
+    -->
+    <NoWarn>$(NoWarn);CA1510;CA1511;CA1512;CA1513;CA1835;CA1847;CA1865;CA1866;CA1867;CA2249;CA2263</NoWarn>
   </PropertyGroup>
 
   <!-- CI fails on any warning, so nothing new slips in. Locally they stay warnings while you work. -->

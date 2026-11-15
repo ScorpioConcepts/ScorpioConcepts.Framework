@@ -4,9 +4,12 @@
     <PackageId>ScorpioConcepts.Framework.netNUTClient</PackageId>
     <Version>3.0.0</Version>
     <Title>Scorpio Concepts .NET NUT Client</Title>
-    <Description>Scorpio Concepts Library providing basics for a NUT client</Description>
-    <PackageReleaseNotes>Targets .NET 10 and .NET Standard 2.0. .NET Framework targets have been dropped.</PackageReleaseNotes>
-    <!-- Previous analyzer level until PR 2 fixes this library's warnings (see Directory.Build.props) -->
-    <AnalysisLevel>latest</AnalysisLevel>
+    <Description>A client for upsd, the network server of Network UPS Tools (NUT): list UPS units, read and set variables, and run instant commands, with optional TLS</Description>
+    <PackageReleaseNotes>Targets .NET 10 and .NET Standard 2.0; .NET Framework targets have been dropped. Breaking changes: command arguments are validated and quoted values escaped, so values can no longer inject extra commands; a command used before Connect() throws InvalidOperationException; a reply that times out throws TimeoutException and closes the connection; Disconnect() only sends LOGOUT after Login(). New: async versions of every command with cancellation, STARTTLS, a connect timeout, IPv6 addresses, thread-safe use from several threads, and UTF-8 replies.</PackageReleaseNotes>
+    <Nullable>enable</Nullable>
   </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="ScorpioConcepts.Framework.netNUTClient.Tests" />
+  </ItemGroup>
 </Project>
