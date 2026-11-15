@@ -1,0 +1,74 @@
+name: Publish to NuGet
+
+# Publishing a GitHub Release builds, tests and packs every library, then pushes each package to
+# NuGet.org. Versions that already exist there are skipped, so only libraries whose <Version> was
+# bumped in their csproj are released.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+# Never run two publishes at the same time
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DBSCHEMA_REQUIRE_DOCKER: true
+
+jobs:
+  publish:
+    name: Publish packages
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Must match the environment in the NuGet.org trusted publishing policy.
+    # Add required reviewers to this environment to approve each publish by hand.
+    environment: nuget
+    permissions:
+      contents: read
+      # Lets NuGet/login exchange a GitHub OIDC token for a short-lived NuGet.org API key
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore ScorpioConcepts.Framework.slnx
+
+      - name: Build
+        run: dotnet build ScorpioConcepts.Framework.slnx -c Release --no-restore -p:ContinuousIntegrationBuild=true
+
+      - name: Test
+        run: dotnet test --solution ScorpioConcepts.Framework.slnx -c Release --no-build
+
+      - name: Pack
+        run: dotnet pack ScorpioConcepts.Framework.slnx -c Release --no-build -o artifacts/packages
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v7
+        with:
+          name: packages
+          path: artifacts/packages/*.nupkg
+          if-no-files-found: error
+
+      - name: Log in to NuGet.org
+        id: nuget-login
+        uses: NuGet/login@v1
+        with:
+          # The NuGet.org account that owns the packages and the trusted publishing policy
+          user: sschocke_scorpio
+
+      - name: Push to NuGet.org
+        run: >
+          dotnet nuget push "artifacts/packages/*.nupkg"
+          --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}"
+          --source https://api.nuget.org/v3/index.json
+          --skip-duplicate

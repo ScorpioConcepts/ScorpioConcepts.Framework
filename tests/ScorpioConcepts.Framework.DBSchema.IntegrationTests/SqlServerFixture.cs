@@ -27,6 +27,9 @@ public sealed class SqlServerFixture : IAsyncLifetime
         }
         catch (DockerUnavailableException ex)
         {
+            // CI sets this so a runner without Docker fails loudly instead of quietly skipping every test
+            if (Environment.GetEnvironmentVariable("DBSCHEMA_REQUIRE_DOCKER") == "true") throw;
+
             UnavailableReason = "Docker is not available: " + ex.Message;
         }
     }

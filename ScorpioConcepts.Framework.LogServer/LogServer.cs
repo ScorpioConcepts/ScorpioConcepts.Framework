@@ -88,10 +88,28 @@ namespace ScorpioConcepts.Framework.LogServer
         }
 
         /// <summary>
-        /// Start the Log Server
+        /// Start the Log Server. When this returns, the server is already accepting connections.
+        /// If the port cannot be opened, <see cref="onServerException"/> is raised before this returns,
+        /// and <see cref="Active"/> stays false.
         /// </summary>
         public void Start()
         {
+            // Open the port here rather than on the server thread, so a client that connects
+            // straight after Start() is never refused, and Active is never true for a server
+            // that could not open its port
+            try
+            {
+                this.tcp_server.Start();
+            }
+            catch (Exception ex)
+            {
+                if (this.onServerException != null)
+                {
+                    this.onServerException(ex);
+                }
+                return;
+            }
+
             // Set this before the thread starts, so a Stop() straight after Start() is not undone by the new thread
             this.running = true;
             this.server_thread.Start();
@@ -110,6 +128,12 @@ namespace ScorpioConcepts.Framework.LogServer
         /// </summary>
         public void Join()
         {
+            // The thread never started if Start() was not called or could not open the port
+            if ((this.server_thread.ThreadState & ThreadState.Unstarted) != 0)
+            {
+                return;
+            }
+
             this.server_thread.Join();
         }
 
@@ -156,8 +180,6 @@ namespace ScorpioConcepts.Framework.LogServer
         {
             try
             {
-                this.tcp_server.Start();
-
                 while (this.running == true)
                 {
                     while (this.tcp_server.Pending())

@@ -36,6 +36,13 @@ dotnet test --project tests/ScorpioConcepts.Framework.LogServer.Tests --filter-m
 - **LogServer.Tests** and **netNUTClient.Tests** use real sockets on loopback. netNUTClient talks to a scripted `FakeUpsdServer`. Every `UPSDClient` call goes through `RunWithTimeout`, so a regression in `ReplyTimeout` handling fails the test instead of hanging the run.
 - Every test is expected to run and pass. Don't merge a test that is skipped to work around a bug; fix the bug in the same change.
 
+## CI and publishing
+
+- `.github/workflows/ci.yml` runs on every PR and push to `master`: build, all tests (TRX results uploaded), and pack (packages uploaded as an artifact). Its `Build and test` job is the required check on `master`. It runs on Ubuntu, because the DBSchema integration tests need Docker, and sets `DBSCHEMA_REQUIRE_DOCKER=true` so they fail rather than skip if Docker is missing.
+- `.github/workflows/publish.yml` runs when a GitHub Release is published. It builds, tests and packs every library, then pushes to NuGet.org with `--skip-duplicate`, so only libraries whose `<Version>` was bumped get published. To release a library, bump `<Version>` and `<PackageVersion>` in its csproj, merge, then publish a release.
+- Publishing uses NuGet.org trusted publishing, so there is no API key secret. `NuGet/login` exchanges the job's GitHub OIDC token for a short-lived key. The NuGet.org policy is tied to the workflow file name `publish.yml` and the `nuget` environment, so renaming either breaks publishing until the policy is updated.
+- Tests must pass on Linux as well as Windows: privileged ports such as LogServer's default 446 can't be bound without root.
+
 ## Architecture
 
 - **LogServer**: `LogServer` runs a `TcpListener` (default port 446) on its own thread. It keeps a bounded queue of recent lines (`logSize`) that new telnet clients get first, then it streams new lines to every connected `LogServer_Client`. Shared state is guarded by a `Mutex`. Errors surface through the `onServerException` event, and connect/disconnect through events too. Callers must `Stop()` and then `Join()`.
