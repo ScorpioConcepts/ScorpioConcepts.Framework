@@ -39,7 +39,7 @@ public class SchemaXmlTests : IDisposable
             </tables>
             """);
 
-        var schema = DBSchema.populateXMLSchema(_file);
+        var schema = DBSchemaXml.Read(_file);
 
         schema.Tables.Keys.ShouldBe(new[] { "Customers", "Orders" });
 
@@ -72,7 +72,7 @@ public class SchemaXmlTests : IDisposable
     {
         File.WriteAllText(_file, xml);
 
-        DBSchema.populateXMLSchema(_file).Tables.ShouldBeEmpty();
+        DBSchemaXml.Read(_file).Tables.ShouldBeEmpty();
     }
 
     [Fact]
@@ -80,7 +80,7 @@ public class SchemaXmlTests : IDisposable
     {
         File.WriteAllText(_file, """<tables><table name="A" /><table name="B"><column name="Id" datatype="int" options="NULL" /></table></tables>""");
 
-        var schema = DBSchema.populateXMLSchema(_file);
+        var schema = DBSchemaXml.Read(_file);
 
         schema.Tables.Keys.ShouldBe(new[] { "A", "B" });
         schema.Tables["A"].Columns.ShouldBeEmpty();
@@ -103,7 +103,7 @@ public class SchemaXmlTests : IDisposable
             </tables>
             """);
 
-        var schema = DBSchema.populateXMLSchema(_file);
+        var schema = DBSchemaXml.Read(_file);
 
         schema.Tables.Keys.ShouldBe(new[] { "A" });
         schema.Tables["A"].Columns.Select(c => c.Name).ShouldBe(new[] { "Id", "Name" });
@@ -114,7 +114,7 @@ public class SchemaXmlTests : IDisposable
     {
         File.WriteAllText(_file, """<tables><table name="A"></table><table name="A"></table></tables>""");
 
-        Should.Throw<ArgumentException>(() => DBSchema.populateXMLSchema(_file));
+        Should.Throw<ArgumentException>(() => DBSchemaXml.Read(_file));
     }
 
     [Theory]
@@ -124,7 +124,7 @@ public class SchemaXmlTests : IDisposable
     {
         File.WriteAllText(_file, xml);
 
-        Should.Throw<Exception>(() => DBSchema.populateXMLSchema(_file));
+        Should.Throw<Exception>(() => DBSchemaXml.Read(_file));
 
         Should.NotThrow(() => File.Delete(_file));
     }
@@ -148,8 +148,8 @@ public class SchemaXmlTests : IDisposable
         orders.PrimaryKey.AddKeyColumn("Id");
         orders.AddForeignKey("FK_Orders_Customers", "CustomerId", "Customers", "Id");
 
-        DBSchema.WriteSchemaXML(schema, _file, new DBDefaultRecords());
-        var read = DBSchema.populateXMLSchema(_file);
+        DBSchemaXml.Write(schema, _file, new DBDefaultRecords());
+        var read = DBSchemaXml.Read(_file);
 
         read.Tables.Keys.ShouldBe(new[] { "Customers", "Orders" });
         foreach (var expected in schema.Tables.Values)
@@ -172,10 +172,10 @@ public class SchemaXmlTests : IDisposable
         var schema = new DBSchema();
         schema.AddTable("Log").AddColumn("Message", "varchar(100)", "NULL");
 
-        DBSchema.WriteSchemaXML(schema, _file, new DBDefaultRecords());
+        DBSchemaXml.Write(schema, _file, new DBDefaultRecords());
 
         File.ReadAllText(_file).ShouldNotContain("primary_key");
-        DBSchema.populateXMLSchema(_file).Tables["Log"].PrimaryKey.KeyColumns.ShouldBeEmpty();
+        DBSchemaXml.Read(_file).Tables["Log"].PrimaryKey.KeyColumns.ShouldBeEmpty();
     }
 
     [Fact]
@@ -192,8 +192,8 @@ public class SchemaXmlTests : IDisposable
         record.AddValue("Value", "<needs & escaping>");
         defaults.AddRecord("NotInSchema").AddValue("Id", 1);
 
-        DBSchema.WriteSchemaXML(schema, _file, defaults);
-        var read = DBSchema.populateXMLSchema(_file);
+        DBSchemaXml.Write(schema, _file, defaults);
+        var read = DBSchemaXml.Read(_file);
 
         // Values are not typed in the XML, so everything comes back as a string.
         read.Tables["Settings"].DefaultRecords.ShouldHaveSingleItem().Values
@@ -207,7 +207,7 @@ public class SchemaXmlTests : IDisposable
         var schema = new DBSchema();
         schema.AddTable("Customers").AddColumn("Id", "int", "NOT NULL");
 
-        DBSchema.WriteSchemaXML(schema, _file, new DBDefaultRecords());
+        DBSchemaXml.Write(schema, _file, new DBDefaultRecords());
 
         DBSchema.DebugLog.ShouldContain(line => line.Contains("Customers"));
     }
