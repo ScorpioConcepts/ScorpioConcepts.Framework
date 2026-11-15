@@ -103,14 +103,67 @@ public class GenerateSchemaXmlTests(SqlServerFixture fixture) : DatabaseTestBase
         File.ReadAllText(copyFile).ShouldBe(original);
     }
 
-    [Fact(Skip = "Known bug: GenerateSchemaXML only records the length of varchar columns, so nvarchar(50), char(10), decimal(10,2) etc. lose their size")]
-    public void Generated_schema_keeps_sizes_of_other_data_types()
+    private const string AllSizedTypes = """
+        CREATE TABLE Products (
+            Code char(10) NOT NULL,
+            Name nvarchar(50) NOT NULL,
+            Initial nchar(1) NULL,
+            Notes varchar(max) NULL,
+            Body nvarchar(max) NULL,
+            Hash binary(32) NULL,
+            Thumbnail varbinary(max) NULL,
+            Price decimal(10,2) NOT NULL,
+            Weight numeric(8,3) NULL,
+            Ratio float(24) NULL,
+            Score float NULL,
+            CreatedAt datetime2(3) NOT NULL,
+            OpensAt time(0) NULL,
+            SeenAt datetimeoffset NULL
+        );
+        """;
+
+    [Fact]
+    public void Generated_schema_keeps_sizes_of_all_data_types()
     {
-        Execute("CREATE TABLE Products (Code char(10) NOT NULL, Name nvarchar(50) NOT NULL, Price decimal(10,2) NOT NULL);");
+        Execute(AllSizedTypes);
 
         var columns = Generate().Element("table")!.Elements("column")
             .Select(c => c.Attribute("datatype")!.Value);
 
-        columns.ShouldBe(new[] { "char(10)", "nvarchar(50)", "decimal(10,2)" });
+        columns.ShouldBe(new[]
+        {
+            "char(10)", "nvarchar(50)", "nchar(1)", "varchar(max)", "nvarchar(max)", "binary(32)", "varbinary(max)",
+            "decimal(10,2)", "numeric(8,3)", "real", "float", "datetime2(3)", "time(0)", "datetimeoffset(7)",
+        });
+    }
+
+    [Fact]
+    public async Task Sized_types_survive_a_round_trip()
+    {
+        Execute(AllSizedTypes);
+        string file = TempFile();
+        DBSchema.GenerateSchemaXML(file);
+
+        await using var copy = await CreateOtherDatabaseAsync();
+        DBSchema.InitializeDB(copy);
+        DBSchema.CheckDatabaseSchema(file);
+
+        string copyFile = TempFile();
+        DBSchema.GenerateSchemaXML(copyFile);
+        File.ReadAllText(copyFile).ShouldBe(File.ReadAllText(file));
+    }
+
+    [Fact]
+    public void Index_columns_keep_their_key_order_and_skip_included_columns()
+    {
+        Execute("""
+            CREATE TABLE People (Id int NOT NULL, FirstName varchar(50) NOT NULL, LastName varchar(50) NOT NULL, Email varchar(100) NULL);
+            CREATE INDEX IX_People_Name ON People (LastName, FirstName DESC) INCLUDE (Email);
+            """);
+
+        var index = Generate().Element("table")!.Elements("index").ShouldHaveSingleItem();
+
+        index.Elements("column").Select(c => $"{c.Attribute("name")!.Value} desc={c.Attribute("desc")!.Value}")
+            .ShouldBe(new[] { "LastName desc=False", "FirstName desc=True" });
     }
 }

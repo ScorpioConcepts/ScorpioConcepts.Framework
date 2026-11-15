@@ -62,10 +62,10 @@ public sealed class UPSDClientTests : IDisposable
         var client = new UPSDClient("127.0.0.1", (ushort)_server.Port);
 
         client.Connected.ShouldBeFalse();
-        Should.Throw<Exception>(() => client.ListUPS()).Message.ShouldContain("Connect()");
-        Should.Throw<Exception>(() => client.GetUPSVar("ups", "ups.status")).Message.ShouldContain("Connect()");
-        Should.Throw<Exception>(() => client.InstantCommand("ups", "beeper.off")).Message.ShouldContain("Connect()");
-        Should.Throw<Exception>(() => client.Logout()).Message.ShouldContain("Connect()");
+        Should.Throw<InvalidOperationException>(() => client.ListUPS()).Message.ShouldContain("Connect()");
+        Should.Throw<InvalidOperationException>(() => client.GetUPSVar("ups", "ups.status")).Message.ShouldContain("Connect()");
+        Should.Throw<InvalidOperationException>(() => client.InstantCommand("ups", "beeper.off")).Message.ShouldContain("Connect()");
+        Should.Throw<InvalidOperationException>(() => client.Logout()).Message.ShouldContain("Connect()");
     }
 
     [Fact]
@@ -76,7 +76,7 @@ public sealed class UPSDClientTests : IDisposable
     }
 
     [Fact]
-    public void Connect_and_Disconnect_update_Connected_and_log_out()
+    public void Disconnect_without_login_closes_without_logging_out()
     {
         _client.Connect();
         _client.Connected.ShouldBeTrue();
@@ -84,6 +84,47 @@ public sealed class UPSDClientTests : IDisposable
         RunWithTimeout(_client.Disconnect);
 
         _client.Connected.ShouldBeFalse();
+        _server.ReceivedCommands.ShouldNotContain("LOGOUT");
+    }
+
+    [Fact]
+    public void Disconnect_after_login_logs_out_first()
+    {
+        _server.Reply("LOGIN rack", "OK\n");
+        var client = Connected();
+        RunWithTimeout(() => client.Login("rack"));
+
+        RunWithTimeout(client.Disconnect);
+
+        client.Connected.ShouldBeFalse();
+        client.LoggedIn.ShouldBeFalse();
+        _server.ReceivedCommands.ShouldBe(new[] { "LOGIN rack", "LOGOUT" });
+    }
+
+    [Fact]
+    public void Disconnect_after_login_still_closes_when_the_server_has_gone()
+    {
+        _server.Reply("LOGIN rack", "OK\n");
+        var client = Connected();
+        RunWithTimeout(() => client.Login("rack"));
+        _server.DropClient();
+
+        Should.NotThrow(() => RunWithTimeout(client.Disconnect));
+
+        client.Connected.ShouldBeFalse();
+        client.LoggedIn.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Dispose_disconnects()
+    {
+        _server.Reply("LOGIN rack", "OK\n");
+        var client = Connected();
+        RunWithTimeout(() => client.Login("rack"));
+
+        RunWithTimeout(client.Dispose);
+
+        client.Connected.ShouldBeFalse();
         _server.ReceivedCommands.ShouldContain("LOGOUT");
     }
 
@@ -249,7 +290,7 @@ public sealed class UPSDClientTests : IDisposable
         RunWithTimeout(() => Connected().SetUPSVariable("rack", "ups.id", "Rack 2")).ShouldBeTrue();
     }
 
-    [Fact(Skip = "Known bug: LoggedIn starts as true and Login/Logout never change it")]
+    [Fact]
     public void LoggedIn_reflects_login_state()
     {
         _server.Reply("LOGIN rack", "OK\n");
@@ -257,8 +298,21 @@ public sealed class UPSDClientTests : IDisposable
         client.LoggedIn.ShouldBeFalse();
 
         RunWithTimeout(() => client.Login("rack"));
-
         client.LoggedIn.ShouldBeTrue();
+
+        RunWithTimeout(client.Logout);
+        client.LoggedIn.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Failed_login_does_not_set_LoggedIn()
+    {
+        _server.Reply("LOGIN rack", "ERR ACCESS-DENIED\n");
+        var client = Connected();
+
+        Should.Throw<UPSException>(() => RunWithTimeout(() => client.Login("rack")));
+
+        client.LoggedIn.ShouldBeFalse();
     }
 
     [Fact]
@@ -311,12 +365,66 @@ public sealed class UPSDClientTests : IDisposable
         }
     }
 
-    [Fact(Skip = "Known bug: UPSDClient has no read timeout, so a server that never replies blocks the call forever")]
-    public void Command_gives_up_when_server_never_replies()
+    [Fact]
+    public void Command_times_out_when_server_never_replies()
     {
         _server.Reply("LOGIN rack", "");
+        _client.ReplyTimeout = TimeSpan.FromMilliseconds(300);
 
-        Should.NotThrow(() => RunWithTimeout(() => Connected().Login("rack")));
+        var ex = Should.Throw<TimeoutException>(() => RunWithTimeout(() => Connected().Login("rack")));
+
+        ex.Message.ShouldContain("LOGIN");
+    }
+
+    [Fact]
+    public void List_command_times_out_when_the_list_never_ends()
+    {
+        _server.Reply("LIST UPS", "BEGIN LIST UPS\nUPS rack \"Rack\"\n");
+        _client.ReplyTimeout = TimeSpan.FromMilliseconds(300);
+
+        Should.Throw<TimeoutException>(() => RunWithTimeout(Connected().ListUPS));
+    }
+
+    [Fact]
+    public void Timeout_message_does_not_include_command_arguments()
+    {
+        _server.Reply("PASSWORD hunter2", "");
+        _client.ReplyTimeout = TimeSpan.FromMilliseconds(300);
+
+        var ex = Should.Throw<TimeoutException>(() => RunWithTimeout(() => Connected().SetPassword("hunter2")));
+
+        ex.Message.ShouldContain("PASSWORD");
+        ex.Message.ShouldNotContain("hunter2");
+    }
+
+    [Fact]
+    public void ReplyTimeout_defaults_to_ten_seconds()
+    {
+        _client.ReplyTimeout.ShouldBe(TimeSpan.FromSeconds(10));
+    }
+
+    [Fact]
+    public void Get_returns_empty_when_reply_is_for_something_else()
+    {
+        _server.Reply("GET VAR rack ups.status", "VAR rack battery.charge \"100\"\n");
+
+        RunWithTimeout(() => Connected().GetUPSVar("rack", "ups.status")).ShouldBe("");
+    }
+
+    [Fact]
+    public void List_returns_empty_when_reply_is_not_a_list()
+    {
+        _server.Reply("LIST UPS", "OK\n");
+
+        RunWithTimeout(Connected().ListUPS).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public void Ok_command_returns_false_for_unexpected_reply()
+    {
+        _server.Reply("INSTCMD rack beeper.off", "OK but not quite\n");
+
+        RunWithTimeout(() => Connected().InstantCommand("rack", "beeper.off")).ShouldBeFalse();
     }
 
     [Theory]
@@ -352,6 +460,26 @@ public sealed class UPSDClientTests : IDisposable
         var ex = Should.Throw<UPSException>(() => RunWithTimeout(() => Connected().Login("rack")));
 
         ex.Code.ShouldBe(UPSException.ErrorCode.UNKNOWN_ERROR);
-        ex.Message.ShouldContain("SOMETHING-NEW");
+        ex.Message.ShouldBe("SOMETHING-NEW is not a recognized UPSD Error Code");
+    }
+
+    [Fact]
+    public void Error_without_extra_text_has_empty_message()
+    {
+        _server.Reply("LOGIN rack", "ERR ACCESS-DENIED\n");
+
+        Should.Throw<UPSException>(() => RunWithTimeout(() => Connected().Login("rack")))
+            .Message.ShouldBe("");
+    }
+
+    [Fact]
+    public void Error_extra_text_is_kept_without_the_line_ending()
+    {
+        _server.Reply("SET VAR rack ups.id \"x\"", "ERR INVALID-ARGUMENT value too long\r\n");
+
+        var ex = Should.Throw<UPSException>(() => RunWithTimeout(() => Connected().SetUPSVariable("rack", "ups.id", "x")));
+
+        ex.Code.ShouldBe(UPSException.ErrorCode.INVALID_ARGUMENT);
+        ex.Message.ShouldBe("value too long");
     }
 }

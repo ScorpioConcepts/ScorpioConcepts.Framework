@@ -76,6 +76,103 @@ public sealed class LogServerTests : IDisposable
     }
 
     [Fact]
+    public async Task Stop_straight_after_Start_still_shuts_down()
+    {
+        for (int i = 0; i < 20; i++)
+        {
+            var server = new LogServer(Wait.FreePort(), "greeting", 10);
+
+            server.Start();
+            server.Stop();
+
+            // WaitAsync throws TimeoutException if Join never returns
+            await Task.Run(server.Join, TestContext.Current.CancellationToken).WaitAsync(Wait.Timeout, TestContext.Current.CancellationToken);
+            server.Active.ShouldBeFalse();
+        }
+    }
+
+    [Fact]
+    public async Task Clients_see_every_line_exactly_once_while_others_connect()
+    {
+        const int lineCount = 2000;
+        var errors = new ConcurrentQueue<Exception>();
+        var connected = new ConcurrentQueue<string>();
+        var server = StartServer(greeting: "hi", logSize: lineCount, configure: s =>
+        {
+            s.onServerException += errors.Enqueue;
+            s.onClientConnect += connected.Enqueue;
+        });
+
+        // Log steadily while clients join part way through. Each client must end up with the
+        // full log once, however its connection lined up with the lines being logged.
+        var logger = Task.Run(() =>
+        {
+            for (int i = 0; i < lineCount; i++)
+            {
+                server.Log("line " + i);
+                if (i % 20 == 0) Thread.Sleep(1);
+            }
+        }, TestContext.Current.CancellationToken);
+
+        var clients = new List<LogClient>();
+        try
+        {
+            while (!logger.IsCompleted && clients.Count < 8)
+            {
+                clients.Add(new LogClient(_port));
+                Thread.Sleep(50);
+            }
+            await logger.WaitAsync(Wait.Timeout, TestContext.Current.CancellationToken);
+
+            var expected = new[] { "hi" }.Concat(Enumerable.Range(0, lineCount).Select(i => "line " + i)).ToArray();
+            clients.Count.ShouldBeGreaterThan(1);
+            foreach (var client in clients)
+            {
+                client.ReadLines(expected.Length).ShouldBe(expected);
+            }
+        }
+        finally
+        {
+            foreach (var client in clients) client.Dispose();
+        }
+
+        errors.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Survives_many_clients_connecting_and_disconnecting()
+    {
+        var errors = new ConcurrentQueue<Exception>();
+        var disconnected = 0;
+        var server = StartServer(greeting: "hi", configure: s =>
+        {
+            s.onServerException += errors.Enqueue;
+            s.onClientDisconnect += _ => Interlocked.Increment(ref disconnected);
+        });
+
+        using var stop = new CancellationTokenSource();
+        var logger = Task.Run(() =>
+        {
+            while (!stop.IsCancellationRequested) server.Log("busy");
+        }, TestContext.Current.CancellationToken);
+
+        Parallel.For(0, 40, new ParallelOptions { MaxDegreeOfParallelism = 8 }, _ =>
+        {
+            using var client = new LogClient(_port);
+            client.ReadLines(1);
+        });
+
+        Wait.Until(() => Volatile.Read(ref disconnected) == 40, "every client has disconnected");
+        stop.Cancel();
+        await logger.WaitAsync(Wait.Timeout, TestContext.Current.CancellationToken);
+
+        errors.ShouldBeEmpty();
+        server.Active.ShouldBeTrue();
+        using var last = new LogClient(_port);
+        last.ReadLines(1)[0].ShouldBe("hi");
+    }
+
+    [Fact]
     public void New_client_receives_greeting_then_history()
     {
         var server = StartServer(greeting: "Welcome to the log");

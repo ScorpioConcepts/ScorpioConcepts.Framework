@@ -56,11 +56,12 @@ namespace ScorpioConcepts.Framework.PlugIn
 
                     foreach (Type pluginType in pluginAssembly.GetTypes())
                     {
-                        if (pluginType.IsAbstract) { continue; }
+                        // Interfaces and abstract classes cannot be created, and neither can open generic types
+                        if (pluginType.IsAbstract || pluginType.ContainsGenericParameters) { continue; }
 
-                        Type testType = pluginType.GetInterface(typeInterface.FullName);
-
-                        if ((pluginType.IsSubclassOf(typeInterface) == true) || (testType != null))
+                        // IsAssignableFrom covers base classes, interfaces and closed generic interfaces
+                        // such as IPlugIn<THost>, which a name based GetInterface lookup never matched
+                        if (typeInterface.IsAssignableFrom(pluginType))
                         {
                             PlugInType instance = (PlugInType)Activator.CreateInstance(pluginType);
                             instance.Initialize(Host);

@@ -265,7 +265,7 @@ public sealed class PlugInManagerTests : IDisposable
         _host.Received(1).ThrowException(Arg.Any<MissingMethodException>());
     }
 
-    [Fact(Skip = "Known bug: Find matches with GetInterface(FullName), which never matches a closed generic interface such as IPlugIn<THost>")]
+    [Fact]
     public void Can_use_the_base_plugin_interface_directly()
     {
         PlugInCompiler.Compile(_directory, Greeter("ViaBaseInterface"));
@@ -276,4 +276,76 @@ public sealed class PlugInManagerTests : IDisposable
         manager.PlugIns.ShouldHaveSingleItem().Name.ShouldBe("ViaBaseInterface");
         _host.DidNotReceiveWithAnyArgs().ThrowException(default!);
     }
+
+    [Fact]
+    public void Base_plugin_interface_finds_every_kind_of_plugin_for_that_host()
+    {
+        PlugInCompiler.Compile(_directory, Greeter("AGreeter") + """
+            public class AnOther : IOtherPlugIn
+            {
+                public string Name => "AnOther";
+                public string Author => "";
+                public string Description => "";
+                public Version Version => new Version(1, 0);
+                public ITestHost Host { get; private set; }
+                public void Initialize(ITestHost host) { Host = host; }
+            }
+            """);
+        var manager = new PlugInManager<IPlugIn<ITestHost>, ITestHost>(_host);
+
+        manager.Find(_directory);
+
+        manager.PlugIns.Select(p => p.Name).OrderBy(n => n).ShouldBe(new[] { "AGreeter", "AnOther" });
+    }
+
+    [Fact]
+    public void Can_use_an_abstract_base_class_as_the_plugin_type()
+    {
+        PlugInCompiler.Compile(_directory, """
+            public class FromBaseClass : GreeterPlugInBase
+            {
+                public override string Name => "FromBaseClass";
+            }
+            """ + Greeter("InterfaceOnly"));
+        var manager = new PlugInManager<GreeterPlugInBase, ITestHost>(_host);
+
+        manager.Find(_directory);
+
+        manager.PlugIns.ShouldHaveSingleItem().Name.ShouldBe("FromBaseClass");
+        manager.PlugIns[0].Host.ShouldBeSameAs(_host);
+    }
+
+    [Fact]
+    public void Skips_open_generic_types()
+    {
+        PlugInCompiler.Compile(_directory, Greeter("Concrete") + """
+            public class Generic<T> : IGreeterPlugIn
+            {
+                public string Name => "Generic";
+                public string Author => "";
+                public string Description => "";
+                public Version Version => new Version(1, 0);
+                public ITestHost Host { get; private set; }
+                public void Initialize(ITestHost host) { Host = host; }
+                public string Greet(string name) => "";
+            }
+            """);
+
+        _manager.Find(_directory);
+
+        FoundNames().ShouldBe(new[] { "Concrete" });
+        _host.DidNotReceiveWithAnyArgs().ThrowException(default!);
+    }
+}
+
+/// <summary>An abstract base class an application could hand to plugin authors instead of an interface.</summary>
+public abstract class GreeterPlugInBase : IGreeterPlugIn
+{
+    public abstract string Name { get; }
+    public string Author => "Base";
+    public string Description => "Base class plugin";
+    public Version Version => new(1, 0);
+    public ITestHost Host { get; private set; } = null!;
+    public void Initialize(ITestHost host) => Host = host;
+    public string Greet(string name) => Name + " greets " + name;
 }

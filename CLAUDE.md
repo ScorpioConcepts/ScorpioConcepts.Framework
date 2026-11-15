@@ -33,8 +33,8 @@ dotnet test --project tests/ScorpioConcepts.Framework.LogServer.Tests --filter-m
 - **DBSchema.IntegrationTests** start SQL Server in Docker through Testcontainers, using one container per run and a fresh database per test. They run serially (see `xunit.runner.json`) because `DBSchema` holds its connection statically. If Docker isn't running, they are skipped instead of failing.
 - **DBSchema.Tests** reach the XML reader/writer through `InternalsVisibleTo`, so no database is needed.
 - **PlugIn.Tests** compile throwaway plugin DLLs with Roslyn (`PlugInCompiler`). Each one gets a unique assembly name, because the default load context can only hold one assembly per name.
-- **LogServer.Tests** and **netNUTClient.Tests** use real sockets on loopback. netNUTClient talks to a scripted `FakeUpsdServer`. Every `UPSDClient` call goes through `RunWithTimeout`, because the client can spin forever on an unexpected reply.
-- Tests marked `[Fact(Skip = "Known bug: ...")]` describe confirmed bugs in the libraries. When you fix one, remove its `Skip`.
+- **LogServer.Tests** and **netNUTClient.Tests** use real sockets on loopback. netNUTClient talks to a scripted `FakeUpsdServer`. Every `UPSDClient` call goes through `RunWithTimeout`, so a regression in `ReplyTimeout` handling fails the test instead of hanging the run.
+- Every test is expected to run and pass. Don't merge a test that is skipped to work around a bug; fix the bug in the same change.
 
 ## Architecture
 
