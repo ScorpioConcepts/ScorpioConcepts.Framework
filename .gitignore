@@ -156,3 +156,9 @@ $RECYCLE.BIN/
 .DS_Store
 *.nupkg
 .vs
+
+# Build output from CI and local dotnet pack / dotnet test runs
+artifacts/
+
+# Local git worktrees created by Claude Code sessions
+.claude/worktrees/

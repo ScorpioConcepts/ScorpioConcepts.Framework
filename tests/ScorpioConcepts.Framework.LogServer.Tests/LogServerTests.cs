@@ -281,10 +281,11 @@ public sealed class LogServerTests : IDisposable
             server.onServerException += errors.Enqueue;
 
             server.Start();
-            server.Join();
 
-            errors.ShouldHaveSingleItem().ShouldBeOfType<SocketException>();
+            // Reported before Start() returns, and the server never becomes active
+            errors.ShouldHaveSingleItem().ShouldBeOfType<SocketException>().SocketErrorCode.ShouldBe(SocketError.AddressAlreadyInUse);
             server.Active.ShouldBeFalse();
+            Should.NotThrow(server.Join);
         }
         finally
         {
@@ -293,16 +294,44 @@ public sealed class LogServerTests : IDisposable
     }
 
     [Fact]
+    public void Clients_can_connect_as_soon_as_Start_returns()
+    {
+        for (int i = 0; i < 20; i++)
+        {
+            int port = Wait.FreePort();
+            var server = new LogServer(port, "ready", 10);
+            server.Start();
+            try
+            {
+                server.Active.ShouldBeTrue();
+                using var client = new LogClient(port);
+                client.ReadLines(1).ShouldBe(new[] { "ready" });
+            }
+            finally
+            {
+                server.Stop();
+                server.Join();
+            }
+        }
+    }
+
+    [Fact]
+    public void Join_without_Start_returns_immediately()
+    {
+        Should.NotThrow(new LogServer(_port, "greeting", 10).Join);
+    }
+
+    [Fact]
     public void Default_constructor_listens_on_port_446()
     {
-        // Port 446 may be taken on a developer machine, so only check the server tries to use it.
+        // Port 446 may be taken on a developer machine, or need root on Linux, so accept either outcome.
         var errors = new ConcurrentQueue<Exception>();
         var server = new LogServer("greeting", 10);
         server.onServerException += errors.Enqueue;
         server.Start();
         try
         {
-            Wait.Until(() => server.Active || !errors.IsEmpty, "the server starts or fails");
+            server.Active.ShouldBe(errors.IsEmpty);
             if (errors.IsEmpty)
             {
                 using var client = new LogClient(446);
@@ -310,7 +339,9 @@ public sealed class LogServerTests : IDisposable
             }
             else
             {
-                errors.Single().ShouldBeOfType<SocketException>().SocketErrorCode.ShouldBe(SocketError.AddressAlreadyInUse);
+                // In use on this machine, or (on Linux without root) a privileged port we may not bind to
+                errors.Single().ShouldBeOfType<SocketException>().SocketErrorCode
+                    .ShouldBeOneOf(SocketError.AddressAlreadyInUse, SocketError.AccessDenied);
             }
         }
         finally
