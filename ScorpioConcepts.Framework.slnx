@@ -1,0 +1,6 @@
+<Solution>
+  <Project Path="ScorpioConcepts.Framework.DBSchema/ScorpioConcepts.Framework.DBSchema.csproj" />
+  <Project Path="ScorpioConcepts.Framework.LogServer/ScorpioConcepts.Framework.LogServer.csproj" />
+  <Project Path="ScorpioConcepts.Framework.netNUTClient/ScorpioConcepts.Framework.netNUTClient.csproj" />
+  <Project Path="ScorpioConcepts.Framework.PlugIn/ScorpioConcepts.Framework.PlugIn.csproj" />
+</Solution>

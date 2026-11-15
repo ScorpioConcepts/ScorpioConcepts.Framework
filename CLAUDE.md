@@ -10,16 +10,17 @@ A collection of independent, small .NET class libraries, each shipped as its own
 
 There is no test project in this repository.
 
-The SDK-style projects (LogServer, PlugIn, netNUTClient) multi-target `net452;netstandard2.0;net5.0`:
+All four projects are SDK-style and multi-target `net10.0;netstandard2.0` (.NET Framework is not supported). The solution uses the XML `.slnx` format, which needs the .NET 10 SDK or Visual Studio 2022 17.13+.
 
 ```
+dotnet build ScorpioConcepts.Framework.slnx
 dotnet build ScorpioConcepts.Framework.LogServer
-dotnet pack  ScorpioConcepts.Framework.LogServer -c Release
+dotnet pack  ScorpioConcepts.Framework.slnx -c Release
 ```
 
-`ScorpioConcepts.Framework.DBSchema` has **not** been migrated: it is still a legacy (non-SDK) csproj targeting .NET Framework 3.5 with `Properties/AssemblyInfo.cs`. It needs Visual Studio / full MSBuild, not `dotnet build`, so building the whole `.sln` with the dotnet CLI may fail on it.
+Package metadata lives in each csproj (there are no `.nuspec` or `AssemblyInfo.cs` files). When releasing, bump both `<Version>` and `<PackageVersion>` and update `<PackageReleaseNotes>`. Every change must still compile for `netstandard2.0`, so avoid APIs that only exist in newer .NET, and C# features that need runtime support netstandard2.0 lacks.
 
-Package metadata lives in each SDK-style csproj (the old `.nuspec` and `AssemblyInfo.cs` files were removed during the .NET 5 migration). When releasing, bump both `<Version>` and `<PackageVersion>` and update `<PackageReleaseNotes>`. Any change must still compile for `net452` and `netstandard2.0`, so avoid newer-only APIs and C# features those targets can't use.
+DBSchema uses `Microsoft.Data.SqlClient`, with a different version per target: 7.x for `net10.0` and 5.2.x for `netstandard2.0`, because 6.0 and later no longer ship a .NET Standard build. Keep the conditional `PackageReference` groups in its csproj when updating them.
 
 ## Architecture
 
