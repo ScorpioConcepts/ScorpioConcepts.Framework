@@ -55,11 +55,16 @@ dotnet test --project tests/ScorpioConcepts.Framework.LogServer.Tests --filter-m
 - `.github/workflows/publish.yml` runs when a GitHub Release is published. It builds, tests and packs every library, then pushes to NuGet.org with `--skip-duplicate`, so only libraries whose `<Version>` was bumped get published. To release a library, bump `<Version>` in its csproj, merge, then publish a release.
 - Actions are pinned to commit SHAs. Dependabot (`.github/dependabot.yml`) keeps them and the NuGet packages up to date. It skips major versions of Microsoft.Data.SqlClient, because DBSchema deliberately stays on two versions.
 - Publishing uses NuGet.org trusted publishing, so there is no API key secret. `NuGet/login` exchanges the job's GitHub OIDC token for a short-lived key. The NuGet.org policy is tied to the workflow file name `publish.yml` and the `nuget` environment, so renaming either breaks publishing until the policy is updated.
-- Tests must pass on Linux as well as Windows: privileged ports such as LogServer's default 446 can't be bound without root.
+- Tests must pass on Linux as well as Windows. For example, ports below 1024 can't be bound without root, and the CI runner isn't root. Socket tests should listen on loopback with port 0 and read the real port back (as LogServer's `LocalEndpoint` and the fake upsd server do), rather than picking a fixed port.
 
 ## Architecture
 
-- **LogServer**: `LogServer` runs a `TcpListener` (default port 446) on its own thread. It keeps a bounded queue of recent lines (`logSize`) that new telnet clients get first, then it streams new lines to every connected `LogServer_Client`. Shared state is guarded by a `Mutex`. Errors surface through the `onServerException` event, and connect/disconnect through events too. Callers must `Stop()` and then `Join()`.
+- **LogServer**: `LogServer` (sealed, `IDisposable`) opens its `TcpListener` in `Start()` and runs an async accept loop. The default is `IPAddress.Any` on port 7446; that default is deliberate and documented as not for production.
+  - **History:** it keeps the last `logSize` lines, which a new client gets after the greeting.
+  - **Clients:** each `LogServerClient` has an async writer that waits for queued lines (no polling) and an async reader that only detects the disconnect.
+  - **One lock:** `logLock` covers both `Log()` and adding a client with its history, so a client gets every line exactly once.
+  - **Limits:** `MaxClients` refuses extra connections. `MaxQueuedLines` drops a slow client's oldest lines and tells it how many it missed.
+  - **Events and shutdown:** errors are raised through `ServerError`, and connects and disconnects through `ClientConnected` and `ClientDisconnected`, all `EventHandler<T>`. Shut down with `Dispose()`, or `Stop()` then `Join()`.
 - **PlugIn**: generic `PlugInManager<TPlugIn, THost>` where `TPlugIn : IPlugIn<THost>` and `THost : IPlugInHost`. `Find(dir)` loads every top-level `*.dll` with `Assembly.LoadFrom`, makes an instance of each non-abstract type that implements the plugin interface (via `Activator.CreateInstance`, so it needs a parameterless constructor), and calls `Initialize(host)`. Exceptions go to `host.ThrowException` instead of being thrown.
 - **netNUTClient**: `UPSDClient` is a client for the NUT `upsd` text protocol (LIST, GET, SET, INSTCMD, LOGIN, STARTTLS and so on).
   - **Sync and async:** every command is async at its core (`SendLockedAsync`), and the synchronous methods call the async ones.

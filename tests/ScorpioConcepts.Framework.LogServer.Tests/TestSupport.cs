@@ -18,15 +18,6 @@ internal static class Wait
             Thread.Sleep(10);
         }
     }
-
-    public static int FreePort()
-    {
-        var listener = new TcpListener(IPAddress.Loopback, 0);
-        listener.Start();
-        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        listener.Stop();
-        return port;
-    }
 }
 
 /// <summary>
@@ -37,6 +28,10 @@ internal sealed class LogClient : IDisposable
     private readonly TcpClient _tcp;
     private readonly NetworkStream _stream;
     private readonly StringBuilder _received = new();
+    // A decoder keeps a multi-byte UTF-8 character that is split across reads in one piece
+    private readonly Decoder _decoder = Encoding.UTF8.GetDecoder();
+    private readonly byte[] _buffer = new byte[16 * 1024];
+    private readonly char[] _chars = new char[Encoding.UTF8.GetMaxCharCount(16 * 1024)];
 
     public LogClient(int port)
     {
@@ -51,12 +46,17 @@ internal sealed class LogClient : IDisposable
     /// <summary>Read until at least <paramref name="count"/> complete lines have arrived, and return all lines so far.</summary>
     public string[] ReadLines(int count)
     {
-        var buffer = new byte[4096];
-        while (Lines().Length < count)
+        while (Lines().Length < count && ReadMore())
         {
-            int read = _stream.Read(buffer, 0, buffer.Length);
-            if (read == 0) break;
-            _received.Append(Encoding.ASCII.GetString(buffer, 0, read));
+        }
+        return Lines();
+    }
+
+    /// <summary>Read until a complete line matches <paramref name="match"/>, and return all lines so far.</summary>
+    public string[] ReadUntil(Func<string, bool> match)
+    {
+        while (!Lines().Any(match) && ReadMore())
+        {
         }
         return Lines();
     }
@@ -64,15 +64,12 @@ internal sealed class LogClient : IDisposable
     /// <summary>True once the server has closed the connection.</summary>
     public bool WaitForServerClose()
     {
-        var buffer = new byte[4096];
         try
         {
-            while (true)
+            while (ReadMore())
             {
-                int read = _stream.Read(buffer, 0, buffer.Length);
-                if (read == 0) return true;
-                _received.Append(Encoding.ASCII.GetString(buffer, 0, read));
             }
+            return true;
         }
         catch (IOException ex) when (ex.InnerException is SocketException { SocketErrorCode: SocketError.ConnectionReset })
         {
@@ -80,7 +77,15 @@ internal sealed class LogClient : IDisposable
         }
     }
 
-    public void Send(string text) => _stream.Write(Encoding.ASCII.GetBytes(text));
+    public void Send(string text) => _stream.Write(Encoding.UTF8.GetBytes(text));
+
+    private bool ReadMore()
+    {
+        int read = _stream.Read(_buffer, 0, _buffer.Length);
+        if (read == 0) return false;
+        _received.Append(_chars, 0, _decoder.GetChars(_buffer, 0, read, _chars, 0));
+        return true;
+    }
 
     private string[] Lines()
     {

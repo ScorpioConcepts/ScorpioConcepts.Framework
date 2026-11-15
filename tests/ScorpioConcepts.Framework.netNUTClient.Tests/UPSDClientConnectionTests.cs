@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
@@ -104,20 +105,58 @@ public sealed class UPSDClientConnectionTests : IDisposable
         client.Connected.ShouldBeFalse();
     }
 
-    [Fact]
-    public async Task Commands_from_several_threads_each_get_their_own_reply()
+    private const int SharedVariables = 40;
+
+    private UPSDClient ClientWithManyVariables()
     {
-        const int variables = 40;
-        for (int i = 0; i < variables; i++)
+        for (int i = 0; i < SharedVariables; i++)
         {
             _server.Reply($"GET VAR rack test.var{i}", $"VAR rack test.var{i} \"value {i}\"\n");
         }
         _server.FragmentSize = 7; // slow replies make overlapping commands likely
         var client = Client();
         client.Connect();
+        return client;
+    }
 
-        var results = await Task.WhenAll(Enumerable.Range(0, variables)
-            .Select(i => Task.Run(() => (i, value: client.GetUPSVar("rack", $"test.var{i}")), TestContext.Current.CancellationToken)));
+    [Fact]
+    public void Commands_from_several_threads_each_get_their_own_reply()
+    {
+        var client = ClientWithManyVariables();
+        var results = new ConcurrentBag<(int i, string value)>();
+        var errors = new ConcurrentBag<Exception>();
+
+        // Dedicated threads, not Task.Run: each synchronous call blocks its thread until the reply arrives,
+        // and blocking dozens of thread-pool threads at once starves the pool the replies are read on.
+        var threads = Enumerable.Range(0, 8).Select(t => new Thread(() =>
+        {
+            try
+            {
+                for (int i = t; i < SharedVariables; i += 8)
+                {
+                    results.Add((i, client.GetUPSVar("rack", $"test.var{i}")));
+                }
+            }
+            catch (Exception ex)
+            {
+                errors.Add(ex);
+            }
+        })).ToList();
+        threads.ForEach(t => t.Start());
+        threads.ForEach(t => t.Join(TimeSpan.FromSeconds(30)).ShouldBeTrue("each thread should finish"));
+
+        errors.ShouldBeEmpty();
+        results.Count.ShouldBe(SharedVariables);
+        results.ShouldAllBe(r => r.value == $"value {r.i}");
+    }
+
+    [Fact]
+    public async Task Concurrent_async_commands_each_get_their_own_reply()
+    {
+        var client = ClientWithManyVariables();
+
+        var results = await Task.WhenAll(Enumerable.Range(0, SharedVariables)
+            .Select(async i => (i, value: await client.GetUPSVarAsync("rack", $"test.var{i}", TestContext.Current.CancellationToken))));
 
         results.ShouldAllBe(r => r.value == $"value {r.i}");
     }

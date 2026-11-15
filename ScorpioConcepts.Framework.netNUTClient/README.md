@@ -48,7 +48,9 @@ stays usable.
 ## Async and threads
 Every command has an async version that takes a `CancellationToken`, such as `ConnectAsync`, `ListUPSAsync` and
 `GetUPSVarAsync`. One client can be shared between threads: commands are sent one at a time, so each caller gets
-its own reply.
+its own reply. When many callers share one client, prefer the async methods. Each synchronous call blocks its
+thread until the reply arrives, and dozens of thread-pool threads blocked that way can starve the pool that
+reads the replies.
 
 ## Values are escaped
 UPS, variable and command names must be single words. A name with a space, a quote, a backslash or a line break
