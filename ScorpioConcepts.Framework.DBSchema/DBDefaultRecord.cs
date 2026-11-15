@@ -12,7 +12,7 @@ namespace ScorpioConcepts.Framework.DBSchema;
 /// </summary>
 public sealed class DBDefaultRecord
 {
-    private readonly Dictionary<string, object?> _values = new();
+    private readonly Dictionary<string, object?> _values = new(SqlName.Comparer);
     private readonly List<string> _order = new();
 
     internal DBDefaultRecord()

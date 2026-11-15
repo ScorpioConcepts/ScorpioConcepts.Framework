@@ -59,7 +59,7 @@ public class SchemaXmlTests : IDisposable
 
         var orders = schema.Tables["Orders"];
         var fkey = orders.ForeignKeys.ShouldHaveSingleItem();
-        (fkey.Name, fkey.Column, fkey.ReferencedTable, fkey.ReferencedColumn)
+        (fkey.Name, string.Join(",", fkey.Columns), fkey.ReferencedTable, string.Join(",", fkey.ReferencedColumns))
             .ShouldBe(("FK_Orders_Customers", "CustomerId", "Customers", "Id"));
         orders.DefaultRecords.ShouldHaveSingleItem().Values
             .ShouldBe(new Dictionary<string, object?> { ["Id"] = "1", ["CustomerId"] = "1" });
@@ -161,8 +161,8 @@ public class SchemaXmlTests : IDisposable
             actual.PrimaryKey.Columns.ShouldBe(expected.PrimaryKey.Columns);
             actual.Indexes.Select(i => (i.Name, i.Clustered, i.Unique, string.Join(",", i.Columns)))
                 .ShouldBe(expected.Indexes.Select(i => (i.Name, i.Clustered, i.Unique, string.Join(",", i.Columns))));
-            actual.ForeignKeys.Select(f => (f.Name, f.Column, f.ReferencedTable, f.ReferencedColumn))
-                .ShouldBe(expected.ForeignKeys.Select(f => (f.Name, f.Column, f.ReferencedTable, f.ReferencedColumn)));
+            actual.ForeignKeys.Select(f => (f.Name, string.Join(",", f.Columns), f.ReferencedTable, string.Join(",", f.ReferencedColumns)))
+                .ShouldBe(expected.ForeignKeys.Select(f => (f.Name, string.Join(",", f.Columns), f.ReferencedTable, string.Join(",", f.ReferencedColumns))));
         }
     }
 
