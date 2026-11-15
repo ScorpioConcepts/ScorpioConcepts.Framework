@@ -363,6 +363,9 @@ public sealed class UPSDClientTests : IDisposable
         catch (IOException)
         {
         }
+
+        // Either way the broken connection is dropped, so a reconnect is needed
+        client.Connected.ShouldBeFalse();
     }
 
     [Fact]
@@ -395,6 +398,54 @@ public sealed class UPSDClientTests : IDisposable
 
         ex.Message.ShouldContain("PASSWORD");
         ex.Message.ShouldNotContain("hunter2");
+    }
+
+    [Fact]
+    public void Timeout_closes_the_connection()
+    {
+        _server.ReplyAfter("GET VAR rack ups.status", "VAR rack ups.status \"OL\"\n", TimeSpan.FromMilliseconds(500));
+        _client.ReplyTimeout = TimeSpan.FromMilliseconds(200);
+        var client = Connected();
+
+        Should.Throw<TimeoutException>(() => RunWithTimeout(() => client.GetUPSVar("rack", "ups.status")))
+            .Message.ShouldContain("connection has been closed");
+
+        client.Connected.ShouldBeFalse();
+        client.LoggedIn.ShouldBeFalse();
+        Should.Throw<InvalidOperationException>(() => client.GetUPSVar("rack", "battery.charge"));
+    }
+
+    [Fact]
+    public void Late_reply_is_never_read_as_the_reply_to_the_next_command()
+    {
+        _server
+            .ReplyAfter("GET VAR rack ups.status", "VAR rack ups.status \"OL\"\n", TimeSpan.FromMilliseconds(400))
+            .Reply("GET VAR rack battery.charge", "VAR rack battery.charge \"100\"\n");
+        _client.ReplyTimeout = TimeSpan.FromMilliseconds(150);
+        var client = Connected();
+        Should.Throw<TimeoutException>(() => RunWithTimeout(() => client.GetUPSVar("rack", "ups.status")));
+        Thread.Sleep(400); // the late reply has now been sent
+
+        client.ReplyTimeout = TimeSpan.FromSeconds(5);
+        client.Connect();
+
+        RunWithTimeout(() => client.GetUPSVar("rack", "battery.charge")).ShouldBe("100");
+        _server.Connections.ShouldBe(2);
+    }
+
+    [Fact]
+    public void Error_reply_keeps_the_connection_usable()
+    {
+        _server
+            .Reply("GET VAR rack missing.var", "ERR VAR-NOT-SUPPORTED\n")
+            .Reply("GET VAR rack ups.status", "VAR rack ups.status \"OL\"\n");
+        var client = Connected();
+
+        Should.Throw<UPSException>(() => RunWithTimeout(() => client.GetUPSVar("rack", "missing.var")));
+
+        client.Connected.ShouldBeTrue();
+        RunWithTimeout(() => client.GetUPSVar("rack", "ups.status")).ShouldBe("OL");
+        _server.Connections.ShouldBe(1);
     }
 
     [Fact]

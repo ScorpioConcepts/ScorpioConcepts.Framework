@@ -31,7 +31,8 @@ namespace ScorpioConcepts.Framework.netNUTClient
         public bool LoggedIn { get { return this.loggedin; } }
         /// <summary>
         /// How long to wait for the UPSD server to reply to a command before giving up with a <see cref="TimeoutException"/>.
-        /// The default is 10 seconds.
+        /// The default is 10 seconds. After a timeout the connection is closed, because a late reply would otherwise be
+        /// read as the reply to the next command; call <see cref="Connect"/> again to continue.
         /// </summary>
         public TimeSpan ReplyTimeout { get; set; } = TimeSpan.FromSeconds(10);
 
@@ -403,6 +404,11 @@ namespace ScorpioConcepts.Framework.netNUTClient
         /// Send a command and read the reply until <paramref name="isComplete"/> says it is complete
         /// </summary>
         /// <returns>The reply, or null if the server closed the connection before replying</returns>
+        /// <remarks>
+        /// If the reply times out, the server closes the connection, or the connection fails, the connection is
+        /// dropped and <see cref="Connected"/> becomes false. A reply that arrives late can then never be read as
+        /// the reply to a later command; call <see cref="Connect"/> to start a fresh connection.
+        /// </remarks>
         /// <exception cref="UPSException">The server replied with an error</exception>
         /// <exception cref="TimeoutException">No complete reply arrived within <see cref="ReplyTimeout"/></exception>
         private string SendCommand(string command, Func<string, bool> isComplete)
@@ -412,43 +418,74 @@ namespace ScorpioConcepts.Framework.netNUTClient
                 throw new InvalidOperationException("You have to connect by calling Connect() first!");
             }
 
-            byte[] data = Encoding.ASCII.GetBytes(command + "\n");
-            clientStream.Write(data, 0, data.Length);
-
-            StringBuilder reply = new StringBuilder();
-            byte[] buffer = new byte[1024];
-            Stopwatch timer = Stopwatch.StartNew();
-            while (true)
+            try
             {
-                string text = reply.ToString();
-                if (text.StartsWith("ERR ") && text.EndsWith("\n"))
-                {
-                    HandleUPSDError(text);
-                }
-                if ((text.Length > 0) && isComplete(text))
-                {
-                    return text;
-                }
+                byte[] data = Encoding.ASCII.GetBytes(command + "\n");
+                clientStream.Write(data, 0, data.Length);
 
-                TimeSpan remaining = ReplyTimeout - timer.Elapsed;
-                if (remaining <= TimeSpan.Zero)
+                StringBuilder reply = new StringBuilder();
+                byte[] buffer = new byte[1024];
+                Stopwatch timer = Stopwatch.StartNew();
+                while (true)
                 {
-                    // Only name the command, never its arguments: PASSWORD would otherwise end up in logs
-                    string commandName = command.Split(' ')[0];
-                    throw new TimeoutException("No complete reply to " + commandName + " from " + upsdServer + " within " + ReplyTimeout.ToString());
-                }
-
-                int waitMicroseconds = (int)Math.Min(remaining.TotalMilliseconds * 1000, 100000);
-                if (client.Client.Poll(waitMicroseconds, SelectMode.SelectRead))
-                {
-                    // Readable with nothing to read means the server closed the connection
-                    int bytesRead = clientStream.Read(buffer, 0, buffer.Length);
-                    if (bytesRead == 0)
+                    string text = reply.ToString();
+                    if (text.StartsWith("ERR ") && text.EndsWith("\n"))
                     {
-                        return null;
+                        // A complete error reply: the stream is still in step, so the connection stays usable
+                        HandleUPSDError(text);
                     }
-                    reply.Append(Encoding.ASCII.GetString(buffer, 0, bytesRead));
+                    if ((text.Length > 0) && isComplete(text))
+                    {
+                        return text;
+                    }
+
+                    TimeSpan remaining = ReplyTimeout - timer.Elapsed;
+                    if (remaining <= TimeSpan.Zero)
+                    {
+                        // The reply may still arrive, and would then be read as the reply to the next command
+                        DropConnection();
+
+                        // Only name the command, never its arguments: PASSWORD would otherwise end up in logs
+                        string commandName = command.Split(' ')[0];
+                        throw new TimeoutException("No complete reply to " + commandName + " from " + upsdServer + " within " + ReplyTimeout.ToString() + "; the connection has been closed");
+                    }
+
+                    int waitMicroseconds = (int)Math.Min(remaining.TotalMilliseconds * 1000, 100000);
+                    if (client.Client.Poll(waitMicroseconds, SelectMode.SelectRead))
+                    {
+                        // Readable with nothing to read means the server closed the connection
+                        int bytesRead = clientStream.Read(buffer, 0, buffer.Length);
+                        if (bytesRead == 0)
+                        {
+                            DropConnection();
+                            return null;
+                        }
+                        reply.Append(Encoding.ASCII.GetString(buffer, 0, bytesRead));
+                    }
                 }
+            }
+            catch (Exception ex) when (ex is IOException || ex is SocketException || ex is ObjectDisposedException)
+            {
+                // A failed read or write leaves the stream in an unknown state
+                DropConnection();
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Close the connection without talking to the server, because it can no longer be trusted
+        /// </summary>
+        private void DropConnection()
+        {
+            this.connected = false;
+            this.loggedin = false;
+            try
+            {
+                this.clientStream.Close();
+                this.client.Close();
+            }
+            catch (Exception ex) when (ex is IOException || ex is SocketException || ex is ObjectDisposedException)
+            {
             }
         }
 

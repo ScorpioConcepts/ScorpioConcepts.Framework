@@ -6,20 +6,25 @@ using System.Text;
 namespace ScorpioConcepts.Framework.netNUTClient.Tests;
 
 /// <summary>
-/// A scripted stand-in for a NUT upsd server. Accepts one client and answers each
-/// newline-terminated command with the reply registered for it.
+/// A scripted stand-in for a NUT upsd server. Serves one client at a time, accepting the next
+/// when it disconnects, and answers each newline-terminated command with the reply registered for it.
 /// </summary>
 internal sealed class FakeUpsdServer : IDisposable
 {
     private readonly TcpListener _listener = new(IPAddress.Loopback, 0);
     private readonly ConcurrentDictionary<string, string> _replies = new();
+    private readonly ConcurrentDictionary<string, TimeSpan> _delays = new();
     private readonly CancellationTokenSource _cts = new();
     private readonly Task _serverTask;
     private TcpClient? _client;
     private readonly TaskCompletionSource _accepted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private int _connections;
 
     public ConcurrentQueue<string> ReceivedCommands { get; } = new();
     public int Port { get; }
+
+    /// <summary>How many client connections the server has accepted so far.</summary>
+    public int Connections => Volatile.Read(ref _connections);
 
     /// <summary>When set, replies are sent in pieces of this many bytes with a short pause between them.</summary>
     public int? FragmentSize { get; set; }
@@ -38,7 +43,14 @@ internal sealed class FakeUpsdServer : IDisposable
         return this;
     }
 
-    /// <summary>Wait for the client to connect, then close its connection from the server side.</summary>
+    /// <summary>Answer <paramref name="command"/> only after <paramref name="delay"/>.</summary>
+    public FakeUpsdServer ReplyAfter(string command, string reply, TimeSpan delay)
+    {
+        _delays[command] = delay;
+        return Reply(command, reply);
+    }
+
+    /// <summary>Wait for the first client to connect, then close its connection from the server side.</summary>
     public void DropClient()
     {
         _accepted.Task.Wait(TimeSpan.FromSeconds(5)).ShouldBeTrue("client never connected");
@@ -49,41 +61,56 @@ internal sealed class FakeUpsdServer : IDisposable
     {
         try
         {
-            _client = await _listener.AcceptTcpClientAsync(_cts.Token);
-            _accepted.TrySetResult();
-            using var stream = _client.GetStream();
-            var pending = new StringBuilder();
-            var buffer = new byte[1024];
-
             while (!_cts.IsCancellationRequested)
             {
-                int read = await stream.ReadAsync(buffer, _cts.Token);
-                if (read == 0) return;
-                pending.Append(Encoding.ASCII.GetString(buffer, 0, read));
-
-                string text = pending.ToString();
-                int newline;
-                while ((newline = text.IndexOf('\n')) >= 0)
+                _client = await _listener.AcceptTcpClientAsync(_cts.Token);
+                Interlocked.Increment(ref _connections);
+                _accepted.TrySetResult();
+                try
                 {
-                    string command = text[..newline];
-                    text = text[(newline + 1)..];
-                    ReceivedCommands.Enqueue(command);
-
-                    string reply = _replies.TryGetValue(command, out var r) ? r : "ERR UNKNOWN-COMMAND\n";
-                    await SendAsync(stream, reply);
-
-                    if (command == "LOGOUT")
-                    {
-                        _client.Close();
-                        return;
-                    }
+                    await ServeClientAsync(_client);
                 }
-                pending.Clear().Append(text);
+                catch (IOException) { }
+                catch (ObjectDisposedException) { }
+                finally
+                {
+                    _client.Close();
+                }
             }
         }
         catch (Exception) when (_cts.IsCancellationRequested) { }
-        catch (IOException) { }
         catch (ObjectDisposedException) { }
+        catch (SocketException) { }
+    }
+
+    private async Task ServeClientAsync(TcpClient client)
+    {
+        using var stream = client.GetStream();
+        var pending = new StringBuilder();
+        var buffer = new byte[1024];
+
+        while (!_cts.IsCancellationRequested)
+        {
+            int read = await stream.ReadAsync(buffer, _cts.Token);
+            if (read == 0) return;
+            pending.Append(Encoding.ASCII.GetString(buffer, 0, read));
+
+            string text = pending.ToString();
+            int newline;
+            while ((newline = text.IndexOf('\n')) >= 0)
+            {
+                string command = text[..newline];
+                text = text[(newline + 1)..];
+                ReceivedCommands.Enqueue(command);
+
+                if (_delays.TryGetValue(command, out var delay)) await Task.Delay(delay, _cts.Token);
+                string reply = _replies.TryGetValue(command, out var r) ? r : "ERR UNKNOWN-COMMAND\n";
+                await SendAsync(stream, reply);
+
+                if (command == "LOGOUT") return;
+            }
+            pending.Clear().Append(text);
+        }
     }
 
     private async Task SendAsync(NetworkStream stream, string reply)
