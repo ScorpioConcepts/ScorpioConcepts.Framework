@@ -1,0 +1,34 @@
+version: 2
+
+updates:
+  # Library and test package references, including tests/Directory.Packages.props
+  - package-ecosystem: nuget
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # Test tooling moves together and never ships to users
+      test-dependencies:
+        patterns:
+          - xunit.*
+          - Shouldly
+          - NSubstitute
+          - Testcontainers*
+          - Microsoft.CodeAnalysis.CSharp
+    ignore:
+      # DBSchema deliberately references two major versions: 7.x for .NET 10 and 5.2.x for
+      # .NET Standard 2.0, because 6.0 and later dropped .NET Standard. A major bump would break
+      # the .NET Standard build, so major versions are updated by hand.
+      - dependency-name: Microsoft.Data.SqlClient
+        update-types: ["version-update:semver-major"]
+
+  # Actions are pinned to commit SHAs; Dependabot updates the SHA and the version comment together
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns:
+          - "*"
