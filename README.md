@@ -11,7 +11,7 @@ This simple library creates a logging target to send anything you want to log to
 _See the documentation in the folder for more details if you are interested in using it._
 
 ## 2. ScorpioConcepts.Framework.PlugIn
-A collection of classes and interfaces to simplify having a plugin framework in your application. Simply inherit from the IPlugInHost interface to create a host class, IPlugIn to define an interface for your plugins, and implement a concrete instance of the PlugInManager abstract class to get automatic detection and enumeration of all plugins present in the specified folder.
+A collection of classes and interfaces to simplify having a plugin framework in your application. Implement IPlugInHost in your application, extend IPlugIn to define an interface for your plugins, and use PlugInManager to find, create and initialize every plugin in a folder. On .NET 10 each plugin gets its own load context, and a plugin that fails to load is reported without stopping the others. Every DLL in the plugin folder runs code in your application, so protect that folder like the application itself.
 
 _See the documentation in the folder for more details if you are interested in using it._
 

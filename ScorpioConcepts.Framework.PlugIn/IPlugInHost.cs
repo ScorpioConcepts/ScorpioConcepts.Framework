@@ -1,21 +1,21 @@
 ﻿using System;
 
-namespace ScorpioConcepts.Framework.PlugIn
+namespace ScorpioConcepts.Framework.PlugIn;
+
+/// <summary>
+/// The base interface for an application that hosts plugins. Extend it to give plugins access to more of the
+/// application.
+/// </summary>
+public interface IPlugInHost
 {
+    /// <summary>Reports an error message from a plugin to the host.</summary>
+    /// <param name="message">The error message.</param>
+    void PlugInError(string message);
+
     /// <summary>
-    /// Defines a base interface for PlugIn Host classes
+    /// Reports an exception to the host. <see cref="PlugInManager{TPlugIn, THost}.Find"/> uses it for every plugin
+    /// that fails to load, passing a <see cref="PlugInLoadException"/>, and plugins can use it for their own errors.
     /// </summary>
-    public interface IPlugInHost
-    {
-        /// <summary>
-        /// Method for returning an error to the PlugIn Host
-        /// </summary>
-        /// <param name="error">Error message</param>
-        void PlugInError(string error);
-        /// <summary>
-        /// Used to pass an exception back to the PlugIn Host from a PlugIn
-        /// </summary>
-        /// <param name="ex"></param>
-        void ThrowException(Exception ex);
-    }
+    /// <param name="ex">The exception.</param>
+    void ThrowException(Exception ex);
 }
