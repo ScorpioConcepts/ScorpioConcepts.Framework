@@ -17,7 +17,7 @@ public interface IOtherPlugIn : IPlugIn<ITestHost>
 {
 }
 
-public sealed class PlugInManagerTests : IDisposable
+public sealed partial class PlugInManagerTests : IDisposable
 {
     private const string GreeterTemplate = """
         public class {0} : IGreeterPlugIn
@@ -195,7 +195,8 @@ public sealed class PlugInManagerTests : IDisposable
         _manager.Find(_directory);
 
         _manager.PlugIns.ShouldBeEmpty();
-        _host.Received(1).ThrowException(Arg.Any<BadImageFormatException>());
+        _host.Received(1).ThrowException(Arg.Is<PlugInLoadException>(ex =>
+            ex.InnerException is BadImageFormatException && ex.TypeName == null && ex.FilePath!.EndsWith("not-a-dotnet-assembly.dll")));
     }
 
     [Fact]
@@ -217,8 +218,9 @@ public sealed class PlugInManagerTests : IDisposable
 
         _manager.Find(_directory);
 
-        _host.Received(1).ThrowException(Arg.Is<Exception>(ex =>
-            ex is TargetInvocationException && ex.InnerException!.Message == "boom"));
+        // The constructor's own exception, not the reflection wrapper around it
+        _host.Received(1).ThrowException(Arg.Is<PlugInLoadException>(ex =>
+            ex.InnerException is InvalidOperationException && ex.InnerException.Message == "boom" && ex.TypeName == "Exploding"));
     }
 
     [Fact]
@@ -240,7 +242,8 @@ public sealed class PlugInManagerTests : IDisposable
         _manager.Find(_directory);
 
         _manager.PlugIns.ShouldBeEmpty();
-        _host.Received(1).ThrowException(Arg.Is<InvalidOperationException>(ex => ex.Message == "init failed"));
+        _host.Received(1).ThrowException(Arg.Is<PlugInLoadException>(ex =>
+            ex.InnerException is InvalidOperationException && ex.InnerException.Message == "init failed"));
     }
 
     [Fact]
@@ -262,7 +265,7 @@ public sealed class PlugInManagerTests : IDisposable
 
         _manager.Find(_directory);
 
-        _host.Received(1).ThrowException(Arg.Any<MissingMethodException>());
+        _host.Received(1).ThrowException(Arg.Is<PlugInLoadException>(ex => ex.InnerException is MissingMethodException));
     }
 
     [Fact]

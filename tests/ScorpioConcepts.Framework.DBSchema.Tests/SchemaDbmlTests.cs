@@ -9,15 +9,15 @@ public sealed class SchemaDbmlTests : IDisposable
 
     public void Dispose() => File.Delete(_file);
 
-    private DBSchema Read(string dbml)
+    private DBSchemaDefinition Read(string dbml)
     {
         File.WriteAllText(_file, dbml);
         return DBSchemaDbml.Read(_file);
     }
 
-    private string Write(DBSchema schema, DBDefaultRecords? defaults = null)
+    private string Write(DBSchemaDefinition schema)
     {
-        DBSchemaDbml.Write(schema, _file, defaults ?? new DBDefaultRecords());
+        DBSchemaDbml.Write(schema, _file);
         return File.ReadAllText(_file);
     }
 
@@ -25,14 +25,14 @@ public sealed class SchemaDbmlTests : IDisposable
 
     private static string[] Indexes(DBTable table) =>
         table.Indexes.Select(i => $"{i.Name}{(i.Unique ? " UNIQUE" : "")}{(i.Clustered ? " CLUSTERED" : "")}: "
-            + string.Join(",", i.Columns.Select(c => c.Key + (c.Value ? " DESC" : "")))).ToArray();
+            + string.Join(",", i.Columns.Select(c => c.Name + (c.Descending ? " DESC" : "")))).ToArray();
 
     private static string[] ForeignKeys(DBTable table) =>
-        table.ForeignKeys.Select(f => $"{f.Name}: {f.Column} -> {f.PKeyTable}.{f.PKeyColumn}").ToArray();
+        table.ForeignKeys.Select(f => $"{f.Name}: {string.Join(",", f.Columns)} -> {f.ReferencedTable}.{string.Join(",", f.ReferencedColumns)}").ToArray();
 
-    private static DBSchema ShopSchema()
+    private static DBSchemaDefinition ShopSchema()
     {
-        var schema = new DBSchema();
+        var schema = new DBSchemaDefinition();
         var customers = schema.AddTable("Customers");
         customers.AddColumn("Id", "int identity", "NOT NULL");
         customers.AddColumn("Name", "varchar(50)", "NOT NULL DEFAULT ('')");
@@ -40,26 +40,28 @@ public sealed class SchemaDbmlTests : IDisposable
         customers.AddColumn("Balance", "decimal(10,2)", "NOT NULL DEFAULT ((0))");
         customers.AddColumn("Joined", "datetime2(3)", "NOT NULL DEFAULT (getdate())");
         customers.PrimaryKey.Name = "PK_Customers";
-        customers.PrimaryKey.AddKeyColumn("Id");
+        customers.PrimaryKey.AddColumn("Id");
         var index = customers.AddIndex("IX_Customers_Name_Email", clustered: false, unique: true);
-        index.AddIndexColumn("Name", descending: false);
-        index.AddIndexColumn("Email", descending: true);
+        index.AddColumn("Name", descending: false);
+        index.AddColumn("Email", descending: true);
 
         var orders = schema.AddTable("Orders");
         orders.AddColumn("Id", "int", "NOT NULL");
         orders.AddColumn("Line", "int", "NOT NULL");
         orders.AddColumn("CustomerId", "int", "NOT NULL");
         orders.PrimaryKey.Name = "PK_Orders_Custom";
-        orders.PrimaryKey.AddKeyColumn("Id");
-        orders.PrimaryKey.AddKeyColumn("Line");
-        orders.AddIndex("CIX_Orders_CustomerId", clustered: true, unique: false).AddIndexColumn("CustomerId", descending: false);
+        orders.PrimaryKey.AddColumn("Id");
+        orders.PrimaryKey.AddColumn("Line");
+        orders.PrimaryKey.Clustered = false;
+        orders.AddIndex("CIX_Orders_CustomerId", clustered: true, unique: false).AddColumn("CustomerId", descending: false);
         orders.AddForeignKey("FK_Orders_Customers", "CustomerId", "Customers", "Id");
 
         var lines = schema.AddTable("OrderNotes");
         lines.AddColumn("OrderId", "int", "NOT NULL");
         lines.AddColumn("OrderLine", "int", "NOT NULL");
-        lines.AddForeignKey("FK_OrderNotes_Orders", "OrderId", "Orders", "Id");
-        lines.AddForeignKey("FK_OrderNotes_Orders", "OrderLine", "Orders", "Line");
+        var notesKey = lines.AddForeignKey("FK_OrderNotes_Orders", "Orders");
+        notesKey.AddColumn("OrderId", "Id");
+        notesKey.AddColumn("OrderLine", "Line");
         return schema;
     }
 
@@ -170,7 +172,7 @@ public sealed class SchemaDbmlTests : IDisposable
             "Name | varchar(50) | NOT NULL DEFAULT ('none')",
         });
         customers.PrimaryKey.Name.ShouldBe("PK_Customers");
-        customers.PrimaryKey.KeyColumns.ShouldBe(new[] { "Id" });
+        customers.PrimaryKey.Columns.ShouldBe(new[] { "Id" });
         Indexes(customers).ShouldBe(new[] { "IX_Customers_Email UNIQUE: Email" });
 
         var orders = schema.Tables["Orders"];
@@ -185,6 +187,8 @@ public sealed class SchemaDbmlTests : IDisposable
             "IX_Orders_PlacedOn: PlacedOn",
             "IX_ByCustomer UNIQUE CLUSTERED: CustomerId,PlacedOn DESC",
         });
+        orders.PrimaryKey.Clustered.ShouldBeFalse("clustered_index names another index");
+        customers.PrimaryKey.Clustered.ShouldBeTrue();
         ForeignKeys(orders).ShouldBe(new[] { "FK_Orders_CustomerId: CustomerId -> Customers.Id" });
 
         ForeignKeys(schema.Tables["Shipments"]).ShouldBe(new[]
@@ -204,7 +208,7 @@ public sealed class SchemaDbmlTests : IDisposable
             """).Tables["A"];
 
         Columns(table).ShouldBe(new[] { "Id | INT | NOT NULL" });
-        table.PrimaryKey.KeyColumns.ShouldBe(new[] { "Id" });
+        table.PrimaryKey.Columns.ShouldBe(new[] { "Id" });
     }
 
     [Fact]
@@ -228,12 +232,11 @@ public sealed class SchemaDbmlTests : IDisposable
 
         var periods = schema.Tables["Periods"];
         periods.PrimaryKey.Name.ShouldBe("PK_Periods");
-        periods.PrimaryKey.KeyColumns.ShouldBe(new[] { "MerchantId", "Country" });
+        periods.PrimaryKey.Columns.ShouldBe(new[] { "MerchantId", "Country" });
         Columns(periods).ShouldAllBe(c => c.EndsWith("| NOT NULL"), "primary key columns cannot be NULL");
         ForeignKeys(schema.Tables["Sales"]).ShouldBe(new[]
         {
-            "FK_Sales_MerchantId_Country: MerchantId -> Periods.MerchantId",
-            "FK_Sales_MerchantId_Country: Country -> Periods.Country",
+            "FK_Sales_MerchantId_Country: MerchantId,Country -> Periods.MerchantId,Country",
         });
     }
 
@@ -257,7 +260,7 @@ public sealed class SchemaDbmlTests : IDisposable
             """);
 
         var fkey = schema.Tables[table].ForeignKeys.ShouldHaveSingleItem();
-        $"{fkey.Column} -> {fkey.PKeyTable}.{fkey.PKeyColumn}".ShouldBe(expected);
+        $"{fkey.Columns.ShouldHaveSingleItem()} -> {fkey.ReferencedTable}.{fkey.ReferencedColumns.ShouldHaveSingleItem()}".ShouldBe(expected);
         schema.Tables["A"].ForeignKeys.ShouldBeEmpty();
     }
 
@@ -340,7 +343,7 @@ public sealed class SchemaDbmlTests : IDisposable
     [InlineData("NOT NULL", "[not null]")]
     public void Defaults_from_the_database_are_written_as_plain_values_and_read_back_unchanged(string options, string settings)
     {
-        var schema = new DBSchema();
+        var schema = new DBSchemaDefinition();
         schema.AddTable("A").AddColumn("Value", "int", options);
 
         Write(schema).ShouldContain("  Value int " + settings + Environment.NewLine);
@@ -354,7 +357,7 @@ public sealed class SchemaDbmlTests : IDisposable
     [InlineData("", "NULL")]
     public void Hand_written_options_are_written_in_the_usual_form(string options, string readBack)
     {
-        var schema = new DBSchema();
+        var schema = new DBSchemaDefinition();
         schema.AddTable("A").AddColumn("Value", "int", options);
 
         Write(schema);
@@ -365,7 +368,7 @@ public sealed class SchemaDbmlTests : IDisposable
     [Fact]
     public void Options_dbml_cannot_express_are_refused_when_writing()
     {
-        var schema = new DBSchema();
+        var schema = new DBSchemaDefinition();
         schema.AddTable("A").AddColumn("Name", "varchar(10)", "COLLATE Latin1_General_CI_AS NULL");
 
         Should.Throw<NotSupportedException>(() => Write(schema)).Message.ShouldContain("column 'Name' in table 'A'");
@@ -374,14 +377,14 @@ public sealed class SchemaDbmlTests : IDisposable
     [Fact]
     public void Names_and_types_that_need_quotes_are_quoted()
     {
-        var schema = new DBSchema();
+        var schema = new DBSchemaDefinition();
         var table = schema.AddTable("Order Lines");
         table.AddColumn("Note", "varchar(10)", "NULL");
         table.AddColumn("indexes", "int", "NULL");
         table.AddColumn("Say \"hi\"", "decimal(10, 2)", "NULL");
         table.AddColumn("2fa", "double precision", "NULL");
         table.PrimaryKey.Name = "PK_Order Lines";
-        table.PrimaryKey.AddKeyColumn("indexes");
+        table.PrimaryKey.AddColumn("indexes");
 
         string dbml = Write(schema);
 
@@ -446,48 +449,45 @@ public sealed class SchemaDbmlTests : IDisposable
 
         schema.Tables["Settings"].DefaultRecords.Select(r => r.Values).ShouldBe(new[]
         {
-            new Dictionary<string, object> { ["Id"] = 1, ["Name"] = "Theme", ["Enabled"] = true, ["Limit"] = 12.5m },
-            new Dictionary<string, object> { ["Id"] = 2, ["Name"] = "Beta", ["Enabled"] = false, ["Limit"] = DBNull.Value },
-            new Dictionary<string, object> { ["Id"] = 3, ["Name"] = "Empty is null", ["Enabled"] = true, ["Limit"] = DBNull.Value },
-            new Dictionary<string, object> { ["Id"] = 5, ["Name"] = "Default limit" },
-            new Dictionary<string, object> { ["Id"] = -4, ["Name"] = "Multi-line\n  text\n", ["Enabled"] = 0, ["Limit"] = 5_000_000_000L },
+            new Dictionary<string, object?> { ["Id"] = 1, ["Name"] = "Theme", ["Enabled"] = true, ["Limit"] = 12.5m },
+            new Dictionary<string, object?> { ["Id"] = 2, ["Name"] = "Beta", ["Enabled"] = false, ["Limit"] = DBNull.Value },
+            new Dictionary<string, object?> { ["Id"] = 3, ["Name"] = "Empty is null", ["Enabled"] = true, ["Limit"] = DBNull.Value },
+            new Dictionary<string, object?> { ["Id"] = 5, ["Name"] = "Default limit" },
+            new Dictionary<string, object?> { ["Id"] = -4, ["Name"] = "Multi-line\n  text\n", ["Enabled"] = 0, ["Limit"] = 5_000_000_000L },
         });
         schema.Tables["Other"].DefaultRecords.ShouldHaveSingleItem().Values
-            .ShouldBe(new Dictionary<string, object> { ["Id"] = 1, ["Name"] = "It's here" });
+            .ShouldBe(new Dictionary<string, object?> { ["Id"] = 1, ["Name"] = "It's here" });
     }
 
     [Fact]
     public void Default_record_values_keep_their_types()
     {
-        var schema = new DBSchema();
+        var schema = new DBSchemaDefinition();
         var settings = schema.AddTable("Settings");
         foreach (var column in new[] { "Int", "Long", "Decimal", "Double", "Bool", "Text", "Null", "DBNull", "Date", "Guid" })
         {
             settings.AddColumn(column, "sql_variant", "NULL");
         }
-        var defaults = new DBDefaultRecords();
-        var record = defaults.AddRecord("Settings");
+        var record = settings.AddDefaultRecord();
         record.AddValue("Int", 42);
         record.AddValue("Long", 5_000_000_000L);
         record.AddValue("Decimal", 12.50m);
         record.AddValue("Double", 0.1);
         record.AddValue("Bool", true);
         record.AddValue("Text", "It's a \"line\"\nand\\more");
-        record.AddValue("Null", null!);
+        record.AddValue("Null", null);
         record.AddValue("DBNull", DBNull.Value);
         record.AddValue("Date", new DateTime(2026, 11, 15, 8, 30, 0));
         record.AddValue("Guid", Guid.Parse("8184a1a7-2536-4da3-8408-5624ab412f4c"));
-        defaults.AddRecord("Settings").AddValue("Int", 7);
-        defaults.AddRecord("NotInSchema").AddValue("Id", 1);
+        settings.AddDefaultRecord().AddValue("Int", 7);
 
-        string dbml = Write(schema, defaults);
+        string dbml = Write(schema);
         var read = DBSchemaDbml.Read(_file);
 
         dbml.ShouldContain("    7, `DEFAULT`, `DEFAULT`,");
-        read.Tables.Keys.ShouldBe(new[] { "Settings" });
         read.Tables["Settings"].DefaultRecords.Select(r => r.Values).ShouldBe(new[]
         {
-            new Dictionary<string, object>
+            new Dictionary<string, object?>
             {
                 ["Int"] = 42,
                 ["Long"] = 5_000_000_000L,
@@ -501,7 +501,7 @@ public sealed class SchemaDbmlTests : IDisposable
                 ["Guid"] = "8184a1a7-2536-4da3-8408-5624ab412f4c",
             },
             // The second record only has Int; its other fields are written as `DEFAULT`, so they stay out of the record
-            new Dictionary<string, object> { ["Int"] = 7 },
+            new Dictionary<string, object?> { ["Int"] = 7 },
         });
     }
 
@@ -527,11 +527,11 @@ public sealed class SchemaDbmlTests : IDisposable
     [Fact]
     public void More_than_one_clustered_index_is_refused_when_writing()
     {
-        var schema = new DBSchema();
+        var schema = new DBSchemaDefinition();
         var table = schema.AddTable("A");
         table.AddColumn("Id", "int", "NULL");
-        table.AddIndex("CIX_1", clustered: true, unique: false).AddIndexColumn("Id", descending: false);
-        table.AddIndex("CIX_2", clustered: true, unique: false).AddIndexColumn("Id", descending: true);
+        table.AddIndex("CIX_1", clustered: true, unique: false).AddColumn("Id", descending: false);
+        table.AddIndex("CIX_2", clustered: true, unique: false).AddColumn("Id", descending: true);
 
         Should.Throw<NotSupportedException>(() => Write(schema)).Message.ShouldContain("more than one clustered index");
     }
@@ -588,11 +588,107 @@ public sealed class SchemaDbmlTests : IDisposable
         Should.Throw<FormatException>(() => Read(dbml)).Message.ShouldContain(expected);
     }
 
-    [Fact]
-    public void Write_records_progress_in_DebugLog()
+    [Theory]
+    [InlineData("Table A {\n  Id int [identity_seed: 5]\n}", "identity_seed and identity_increment need [increment] on column 'Id' of table 'A'")]
+    [InlineData("Table A {\n  Id int [increment, identity_seed: 1.5]\n}", "'identity_seed' must be a whole number")]
+    [InlineData("Table A {\n  Id int [default_name: 'DF_A_Id']\n}", "default_name needs a default on column 'Id' of table 'A'")]
+    [InlineData("Table A {\n  Id int [persisted: true]\n}", "Only a computed column, whose type is AS (expression), can be persisted")]
+    [InlineData("Table A {\n  Total \"AS ([Id]*2)\" [not null]\n}", "can only be not null when it is persisted")]
+    [InlineData("Table A {\n  Total \"AS ([Id]*2)\" [default: 0]\n}", "cannot have increment or a default")]
+    [InlineData("Table A {\n  Id int\n}\nTable a {\n  Id int\n}", "Table 'a' is defined more than once")]
+    [InlineData("Table A {\n  Total \"AS ([Id]*2)\" [persisted]\n}", "'persisted' must be true or false, as in persisted: true")]
+    [InlineData("Table A [clustered_index: null] {\n  Id int [pk]\n}", "clustered_index must be an index name such as 'CIX_A', or false to cluster nothing")]
+    public void Invalid_column_properties_explain_what_is_wrong(string dbml, string expected)
     {
-        Write(ShopSchema());
+        Should.Throw<FormatException>(() => Read(dbml)).Message.ShouldContain(expected);
+    }
 
-        DBSchema.DebugLog.ShouldContain("DB Schema DBML generated for table 'Orders'");
+    [Theory]
+    [InlineData("int identity", "NOT NULL", "Id int [increment, not null]")]
+    [InlineData("int identity(1000,5)", "NOT NULL", "Id int [increment, identity_seed: 1000, identity_increment: 5, not null]")]
+    [InlineData("bigint identity(-1,-1)", "NOT NULL", "Id bigint [increment, identity_seed: -1, identity_increment: -1, not null]")]
+    [InlineData("int", "NOT NULL CONSTRAINT [DF_A_Id] DEFAULT ((0))", "Id int [not null, default: 0, default_name: 'DF_A_Id']")]
+    [InlineData("int", "NULL CONSTRAINT [DF]]odd] DEFAULT (getdate())", "Id int [default: `getdate()`, default_name: 'DF]odd']")]
+    [InlineData("AS ([Qty]*[Price])", "", "Id \"AS ([Qty]*[Price])\"")]
+    [InlineData("AS ([Qty]*[Price])", "PERSISTED", "Id \"AS ([Qty]*[Price])\" [persisted: true]")]
+    [InlineData("AS ([Qty]*[Price])", "PERSISTED NOT NULL", "Id \"AS ([Qty]*[Price])\" [not null, persisted: true]")]
+    public void Columns_from_the_database_round_trip_through_dbml(string dataType, string options, string written)
+    {
+        var schema = new DBSchemaDefinition();
+        schema.AddTable("A").AddColumn("Id", dataType, options);
+
+        Write(schema).ShouldContain("  " + written + Environment.NewLine);
+
+        var column = DBSchemaDbml.Read(_file).Tables["A"].Columns.ShouldHaveSingleItem();
+        (column.DataType, column.Options).ShouldBe((dataType, options));
+    }
+
+    [Fact]
+    public void Primary_key_is_clustered_unless_the_table_clusters_another_index_or_nothing()
+    {
+        var schema = new DBSchemaDefinition();
+        var usual = schema.AddTable("Usual");
+        usual.AddColumn("Id", "int", "NOT NULL");
+        usual.PrimaryKey.Name = "PK_Usual";
+        usual.PrimaryKey.AddColumn("Id");
+
+        var other = schema.AddTable("Other");
+        other.AddColumn("Id", "int", "NOT NULL");
+        other.AddColumn("PlacedOn", "datetime2(3)", "NOT NULL");
+        other.PrimaryKey.Name = "PK_Other";
+        other.PrimaryKey.AddColumn("Id");
+        other.PrimaryKey.Clustered = false;
+        other.AddIndex("CIX_Other_PlacedOn", clustered: true, unique: false).AddColumn("PlacedOn", descending: true);
+
+        var heap = schema.AddTable("Heap");
+        heap.AddColumn("Id", "int", "NOT NULL");
+        heap.PrimaryKey.Name = "PK_Heap";
+        heap.PrimaryKey.AddColumn("Id");
+        heap.PrimaryKey.Clustered = false;
+
+        string dbml = Write(schema);
+
+        dbml.ShouldContain("Table Usual {");
+        dbml.ShouldContain("Table Other [clustered_index: 'CIX_Other_PlacedOn'] {");
+        dbml.ShouldContain("Table Heap [clustered_index: false] {");
+        var read = DBSchemaDbml.Read(_file);
+        SchemaAssert.SameStructure(read, schema);
+        read.TablesInOrder.Select(t => t.PrimaryKey.Clustered).ShouldBe(new[] { true, false, false });
+    }
+
+    [Fact]
+    public void Clustered_primary_key_and_clustered_index_are_refused_when_writing()
+    {
+        var schema = new DBSchemaDefinition();
+        var table = schema.AddTable("A");
+        table.AddColumn("Id", "int", "NOT NULL");
+        table.PrimaryKey.Name = "PK_A";
+        table.PrimaryKey.AddColumn("Id");
+        table.AddIndex("CIX_A", clustered: true, unique: false).AddColumn("Id", descending: true);
+
+        Should.Throw<NotSupportedException>(() => Write(schema)).Message.ShouldContain("more than one clustered index");
+    }
+
+    [Fact]
+    public void Names_are_not_case_sensitive_like_sql_server()
+    {
+        var schema = Read("""
+            Table Customers {
+              Id int [pk]
+            }
+            Table Orders {
+              CustomerId int [ref: > customers.ID]
+              indexes {
+                customerid [name: 'IX_Orders_Customer']
+              }
+            }
+            records orders(CUSTOMERID) {
+              1
+            }
+            """);
+
+        ForeignKeys(schema.Tables["orders"]).ShouldBe(new[] { "FK_Orders_CustomerId: CustomerId -> Customers.ID" });
+        Indexes(schema.Tables["Orders"]).ShouldBe(new[] { "IX_Orders_Customer: customerid" });
+        schema.Tables["Orders"].DefaultRecords.ShouldHaveSingleItem().Values["CustomerId"].ShouldBe(1);
     }
 }

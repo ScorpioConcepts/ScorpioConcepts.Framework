@@ -4,9 +4,4 @@
     <ProjectReference Include="../../ScorpioConcepts.Framework.DBSchema/ScorpioConcepts.Framework.DBSchema.csproj" />
   </ItemGroup>
 
-  <!-- DBSchema.DebugLog is a shared static list, so tests that write schemas must not run in parallel -->
-  <ItemGroup>
-    <Content Include="xunit.runner.json" CopyToOutputDirectory="PreserveNewest" />
-  </ItemGroup>
-
 </Project>

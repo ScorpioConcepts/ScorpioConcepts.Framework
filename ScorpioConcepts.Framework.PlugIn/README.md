@@ -1,126 +1,129 @@
 # Simple Plug In Library
 
 ## Overview
-This is a library I wrote to facilitate the simple addition and management of Plug In functionality in my .NET projects. The basics are fairly simple. There are a bunch of interfaces that define the basic structure required for the plugins, and a base manager class which needs to be extended to manage a specific set of plugins.
+A small library for adding plugins to a .NET application. The application defines what a plugin looks like
+with an interface, and `PlugInManager` finds every class in a folder of DLLs that implements it, creates it and
+hands it the host application.
+
+> [!WARNING]
+> **Every DLL in the plugin folder is loaded, and loading a DLL runs code from it.** Anyone who can put a file
+> in that folder can run code inside your application, with all of its permissions. Protect the folder as
+> carefully as the application's own install folder: don't point `Find()` at a folder that ordinary users,
+> uploads or downloads can write to.
 
 ## Interfaces
 ### IPlugInHost
-**IPlugInHost** defines the basics that a program needs to implement to host plugins. It only has 2 methods that need to be implemented that deal primarily with error handling for your plugins called _PlugInError_ and _ThrowException_. They allow a plugin to throw an Exception or send an Error Message to your hosting application without needing to know anything about the hosting applications error handling.
+`IPlugInHost` is what the host application implements. Its two methods let plugins report problems without
+knowing how the application handles errors:
+- `PlugInError(string message)` reports an error message.
+- `ThrowException(Exception ex)` reports an exception. `PlugInManager` also uses it for every plugin that fails
+  to load (see [Errors](#errors)).
 
-### IPlugIn
-**IPlugIn&lt;_PlugInHost_&gt;** is a generic interface. The _PlugInHost_ template class defines what interface/class is hosting the plugins. This can be as simple as using **IPlugInHost** directly if you don't need to make any additional host functionlity available to your plugins, or you can define a whole new interface/class inheriting from **IPlugInHost** to make a range of properties, methods and even fields available. Each instance of a plugin will then have a property called _Host_ of the class _PlugInHost_. This is also where you define the methods and properties that will be available to the host application via your plugins.
+Extend it with your own interface to give plugins access to more of the application.
 
-### PlugInManager
-**PlugInManager&lt;_PlugInType, PlugInHost_&gt;** is a generic base class. You can either subclass this if you want to add convenience functions like calling a method on all plugins, or you can simply create an instance for the basic functionality. This class has only one method **Find(_string directory_)**. This method scans the specified directory and finds all **.dll** files that implement **PlugInType**. It then creates an instance of all classes in the **.dll** file that implement **PlugInType**, calls their **.Inititialize()** method, and adds them to the **PlugIns** list of the manager.
+### IPlugIn&lt;THost&gt;
+`IPlugIn<THost>` is the base interface for plugins, where `THost` is the host type the plugins get. It has
+`Name`, `Author`, `Description` and `Version` properties, a `Host` property, and `Initialize(THost host)`, which
+the manager calls once straight after creating the plugin. Define your own plugin interface on top of it with
+the methods your application calls.
+
+### PlugInManager&lt;TPlugIn, THost&gt;
+`PlugInManager<TPlugIn, THost>` does the finding. Use it as it is, or subclass it to add helpers such as calling a
+method on every plugin. `Find(directory)` scans the `*.dll` files in that folder (not its subfolders). For each
+public, non-abstract class that is a `TPlugIn` and has a public parameterless constructor, it creates an instance,
+calls `Initialize(host)` and adds it to `PlugIns`.
+
+`PlugIns` is a read-only list. Each call to `Find()` replaces it with a new list when it finishes, so a list you
+read earlier never changes underneath you.
+
+## Errors
+A DLL or a plugin that fails to load doesn't stop the others. `Find()` passes each failure to
+`host.ThrowException` as a `PlugInLoadException`, and carries on:
+- `FilePath` is the DLL that failed.
+- `TypeName` is the plugin class that failed, or null when the whole DLL failed (for example, it isn't a .NET
+  assembly).
+- `InnerException` is the original error, such as the exception the plugin's constructor or `Initialize()`
+  threw.
+
+If some classes in a DLL need a dependency that is missing, the classes that don't need it still load, and the
+missing dependency is reported.
+
+## Dependencies and load contexts
+On .NET 10, each plugin DLL is loaded into its own `AssemblyLoadContext`. A plugin's dependencies load from the
+plugin's folder (using its `.deps.json` if it has one), so two plugins can ship different versions of the same
+library, and neither has to match the host's version.
+
+The assemblies that define the plugin contract are always shared with the host, even if a plugin ships a copy:
+this library, the assemblies that define `TPlugIn` and `THost`, and the assemblies those reference. Otherwise
+the plugin's `IPlugIn` would be a different type from the host's. Anything a plugin doesn't ship, including the
+.NET framework itself, comes from the host.
+
+A DLL is loaded once per manager. Calling `Find()` again creates new plugin instances, and picks up DLLs added
+since the last call, but a DLL that has changed is only seen after the application restarts.
+
+On .NET Standard 2.0 (for example .NET Framework hosts), plugins are loaded with `Assembly.LoadFrom` into the
+application's own context, so they share its dependencies.
 
 ## Simple Example
 ### ISamplePlugIn.cs
 ```csharp
 using ScorpioConcepts.Framework.PlugIn;
 
-namespace PlugInHost
+namespace PlugInHost;
+
+public interface ISamplePlugIn : IPlugIn<IPlugInHost>
 {
-    public interface ISamplePlugIn : IPlugIn<IPlugInHost>
-    {
-        void SayHello();
-    }
+    void SayHello();
 }
 ```
-This is the basic plugin definition. In this case, we are creating an interface that specifies that these plugins will be hosted by a **IPlugInHost** host, and that all plugins must implement a method called **SayHello()**
+The plugin contract: plugins are hosted by an `IPlugInHost`, and each one has a `SayHello()` method. Put it in an
+assembly that both the application and the plugins reference.
 
 ### Program.cs
 ```csharp
+using PlugInHost;
 using ScorpioConcepts.Framework.PlugIn;
-using System;
 
-namespace PlugInHost
+var host = new ConsoleHost();
+var manager = new PlugInManager<ISamplePlugIn, IPlugInHost>(host);
+
+string folder = Path.Combine(AppContext.BaseDirectory, "plugins");
+manager.Find(folder);
+Console.WriteLine($"Found {manager.PlugIns.Count} plugins in {folder}");
+
+foreach (ISamplePlugIn plugin in manager.PlugIns)
 {
-    public class Program : IPlugInHost
-    {
-        static void Main(string[] args)
-        {
-            Program instance = new Program();
-            PlugInManager<ISamplePlugIn, IPlugInHost> manager = new PlugInManager<ISamplePlugIn, IPlugInHost>(instance);
+    plugin.SayHello();
+}
 
-            Console.Write("Finding plugins in " + Environment.CurrentDirectory + "...");
-            manager.Find(Environment.CurrentDirectory);
-            Console.WriteLine("Found " + manager.PlugIns.Count + " Sample Plug Ins");
+class ConsoleHost : IPlugInHost
+{
+    public void PlugInError(string message) => Console.WriteLine("Plugin error: " + message);
 
-            Console.WriteLine("Asking all plug ins to say hello...");
-            foreach(ISamplePlugIn plugin in manager.PlugIns)
-            {
-                plugin.SayHello();
-            }
-
-            Console.WriteLine("Press any key to continue...");
-            Console.ReadKey();
-        }
-
-        public void PlugInError(string error)
-        {
-            Console.WriteLine("PlugIn Error: " + error);
-        }
-
-        public void ThrowException(Exception ex)
-        {
-            Console.WriteLine("Unhandled PlugIn Exception: " + ex.ToString());
-        }
-    }
+    public void ThrowException(Exception ex) => Console.WriteLine("Plugin exception: " + ex);
 }
 ```
-This is a short console application called **PlugInHost**. It simply finds and loads all plugins in the same directory than itself, and asks all of them to say hello.
+The application finds the plugins in a `plugins` folder next to it and asks each one to say hello.
 
 ### SamplePlugIn1.cs
 ```csharp
 using PlugInHost;
 using ScorpioConcepts.Framework.PlugIn;
-using System;
 
-namespace SamplePlugIn1
+namespace SamplePlugIn1;
+
+public class SamplePlugIn1 : ISamplePlugIn
 {
-    public class SamplePlugIn1 : ISamplePlugIn
-    {
-        public void SayHello()
-        {
-            Console.WriteLine("Sample Plug In 1 saying 'Hello!'");
-        }
+    public string Name => "SamplePlugIn1";
+    public string Author => "Scorpio Concepts";
+    public string Description => "A sample plugin for ScorpioConcepts.Framework.PlugIn";
+    public Version Version => new(1, 0);
+    public IPlugInHost Host { get; private set; } = null!;
 
-        public string Name
-        {
-            get { return "SamplePlugIn1"; }
-        }
+    public void Initialize(IPlugInHost host) => Host = host;
 
-        public string Author
-        {
-            get { return "Sebastian Schocke"; }
-        }
-
-        public string Description
-        {
-            get { return "Sample Plug In 1 for ScorpioConcepts.Framework.PlugIn demo"; }
-        }
-
-        public Version Version
-        {
-            get { return new Version(1,0); }
-        }
-
-        public IPlugInHost Host
-        {
-            get;
-            private set;
-        }
-
-        public void Initialize(IPlugInHost host)
-        {
-            this.Host = host;
-        }
-    }
+    public void SayHello() => Console.WriteLine("Sample Plug In 1 saying 'Hello!'");
 }
 ```
-This is our sample plug in. This is a separate Class Library project called **SamplePlugIn1**. It references our **PlugInHost** application only because our **ISamplePlugIn** interface is defined in it. It has a couple of pretty standard properties required by IPlugIn, and a method called **Initialize()**. This method is where you would do any initial work your plugin needs to do before being usable. In our case, we are simply storing a reference to the host application.
-
-Also we implemented the **SayHello()** method required by our **ISamplePlugIn** interface. This function can now be called from the host application.
-
-## Conclusion
-The above example is very simplistic, but demonstrates the ease of adding plugin functionality to your applications. It can be downloaded [here](http://www.geekhangar.co.za/ScorpioConcepts/framework/PlugInExample.zip)
+A plugin is a class library that references the contract. `Initialize()` is where it gets ready to be used; this
+one just keeps the host. Build it and copy its DLL into the `plugins` folder.

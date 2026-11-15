@@ -1,25 +1,20 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>net10.0;netstandard2.0</TargetFrameworks>
-    <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <PackageId>ScorpioConcepts.Framework.DBSchema</PackageId>
     <Version>2.0.0</Version>
     <Title>Scorpio Concepts Database Schema</Title>
     <Description>Keeps a SQL Server database structure in sync with a schema defined in a JSON, DBML or XML file</Description>
-    <Authors>Scorpio Concepts</Authors>
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageRequireLicenseAcceptance>False</PackageRequireLicenseAcceptance>
-    <PackageProjectUrl>https://github.com/ScorpioConcepts/ScorpioConcepts.Framework</PackageProjectUrl>
-    <PackageReleaseNotes>Targets .NET 10 and .NET Standard 2.0. .NET Framework targets have been dropped. Uses Microsoft.Data.SqlClient instead of System.Data.SqlClient. Schemas are now generated as JSON by default; XML schema files are still fully supported, and ConvertSchema converts between the two.</PackageReleaseNotes>
-    <PackageVersion>2.0.0</PackageVersion>
-    <Copyright>Copyright Scorpio Concepts 2026</Copyright>
-    <RepositoryType>git</RepositoryType>
-    <RepositoryUrl>https://github.com/ScorpioConcepts/ScorpioConcepts.Framework.git</RepositoryUrl>
+    <PackageReleaseNotes>Targets .NET 10 and .NET Standard 2.0; .NET Framework targets have been dropped. Uses Microsoft.Data.SqlClient instead of System.Data.SqlClient. CheckDatabaseSchema runs in one transaction, quotes every identifier, works in dbo explicitly and compares names without regard to case. Supports foreign keys on several columns, nonclustered primary keys, computed columns, identity seeds and increments, and named default constraints, and reads the database with one query per catalog view. The static DBSchema class is replaced by DBSchemaManager, an instance class that takes its SqlConnection and an optional ILogger in its constructor (DebugLog is gone). Schemas are read and written as DBSchemaDefinition, with read-only collections, and the nested DBTable types are now top-level types (DBColumn, DBPrimaryKey, DBIndex, DBIndexColumn, DBForeignKey). Schemas are now generated as JSON by default; XML schema files are still fully supported, and ConvertSchema converts between the two. The .NET Standard 2.0 build uses the Microsoft.Data.SqlClient 5.2 line, which may not get future fixes; use .NET 10 where you can.</PackageReleaseNotes>
+    <Nullable>enable</Nullable>
   </PropertyGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="ScorpioConcepts.Framework.DBSchema.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0" />
   </ItemGroup>
 
   <!-- Microsoft.Data.SqlClient 6.0+ no longer ships a .NET Standard build, so netstandard2.0 stays on the 5.2 line -->

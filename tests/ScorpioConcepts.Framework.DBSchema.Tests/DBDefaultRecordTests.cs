@@ -10,7 +10,7 @@ public class DBDefaultRecordTests
         record.AddValue("Id", 1);
         record.AddValue("Name", "Admin");
 
-        record.Values.ShouldBe(new Dictionary<string, object> { ["Id"] = 1, ["Name"] = "Admin" });
+        record.Values.ShouldBe(new Dictionary<string, object?> { ["Id"] = 1, ["Name"] = "Admin" });
     }
 
     [Fact]
@@ -70,7 +70,7 @@ public class DBDefaultRecordsTests
 
         var record = records.AddRecord("Users");
 
-        records.Keys.ShouldBe(new[] { "Users" });
+        records.Tables.ShouldBe(new[] { "Users" });
         records["Users"].ShouldHaveSingleItem().ShouldBeSameAs(record);
     }
 

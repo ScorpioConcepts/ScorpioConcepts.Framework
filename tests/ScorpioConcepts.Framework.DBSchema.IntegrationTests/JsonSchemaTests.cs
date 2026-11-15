@@ -26,7 +26,7 @@ public class JsonSchemaTests(SqlServerFixture fixture) : DatabaseTestBase(fixtur
         Execute(ShopDatabase);
         string file = TempFile();
 
-        DBSchema.GenerateSchema(file);
+        Manager.GenerateSchema(file);
 
         using var json = JsonDocument.Parse(File.ReadAllText(file));
         var tables = json.RootElement.GetProperty("tables").EnumerateArray().ToDictionary(t => t.GetProperty("name").GetString()!);
@@ -36,9 +36,9 @@ public class JsonSchemaTests(SqlServerFixture fixture) : DatabaseTestBase(fixtur
             .ShouldBe(new[]
             {
                 "Id | int identity | NOT NULL",
-                "Name | nvarchar(50) | NOT NULL DEFAULT ('')",
+                "Name | nvarchar(50) | NOT NULL CONSTRAINT [DF_Customers_Name] DEFAULT ('')",
                 "Email | varchar(100) | NULL",
-                "Balance | decimal(10,2) | NOT NULL DEFAULT ((0))",
+                "Balance | decimal(10,2) | NOT NULL CONSTRAINT [DF_Customers_Balance] DEFAULT ((0))",
             });
         tables["Orders"].GetProperty("foreignKeys")[0].GetProperty("referencedTable").GetString().ShouldBe("Customers");
     }
@@ -48,21 +48,21 @@ public class JsonSchemaTests(SqlServerFixture fixture) : DatabaseTestBase(fixtur
     {
         Execute(ShopDatabase);
         string file = TempFile();
-        DBSchema.GenerateSchema(file);
+        Manager.GenerateSchema(file);
 
         await using var copy = await CreateOtherDatabaseAsync();
-        DBSchema.InitializeDB(copy);
-        DBSchema.CheckDatabaseSchema(file);
+        var copyManager = new DBSchemaManager(copy);
+        copyManager.CheckDatabaseSchema(file);
 
         string copyFile = TempFile();
-        DBSchema.GenerateSchema(copyFile);
+        copyManager.GenerateSchema(copyFile);
         File.ReadAllText(copyFile).ShouldBe(File.ReadAllText(file));
     }
 
     [Fact]
     public void Creates_tables_and_typed_default_records_from_json()
     {
-        DBSchema.CheckDatabaseSchema(WriteSchema("""
+        Manager.CheckDatabaseSchema(WriteSchema("""
             {
               "tables": [
                 {
@@ -108,7 +108,7 @@ public class JsonSchemaTests(SqlServerFixture fixture) : DatabaseTestBase(fixtur
         int start = text.IndexOf("```json", StringComparison.Ordinal) + "```json".Length;
         string example = text[start..text.IndexOf("```", start, StringComparison.Ordinal)];
 
-        DBSchema.CheckDatabaseSchema(WriteSchema(example));
+        Manager.CheckDatabaseSchema(WriteSchema(example));
 
         Tables().ShouldBe(new[] { "Customers", "Orders" });
         ForeignKeys("Orders").ShouldBe(new[] { "FK_Orders_Customers: CustomerId -> Customers.Id" });
@@ -121,7 +121,7 @@ public class JsonSchemaTests(SqlServerFixture fixture) : DatabaseTestBase(fixtur
     {
         Execute("CREATE TABLE Customers (Id int NOT NULL); INSERT INTO Customers (Id) VALUES (1);");
 
-        DBSchema.CheckDatabaseSchema(WriteSchema("""
+        Manager.CheckDatabaseSchema(WriteSchema("""
             { "tables": [ { "name": "Customers", "columns": [
                 { "name": "Id", "dataType": "int", "options": "NOT NULL" },
                 { "name": "Active", "dataType": "bit", "options": "NOT NULL DEFAULT ((1))" }
@@ -133,17 +133,17 @@ public class JsonSchemaTests(SqlServerFixture fixture) : DatabaseTestBase(fixtur
     }
 
     [Fact]
-    public void GenerateSchema_can_still_write_xml()
+    public void GenerateSchema_writes_xml_when_asked()
     {
         Execute(ShopDatabase);
         string viaFormat = TempFile();
-        string viaXmlMethod = TempFile();
+        string withoutRecords = TempFile();
 
-        DBSchema.GenerateSchema(viaFormat, new DBDefaultRecords(), DBSchemaFormat.Xml);
-        DBSchema.GenerateSchemaXML(viaXmlMethod);
+        Manager.GenerateSchema(viaFormat, new DBDefaultRecords(), DBSchemaFormat.Xml);
+        Manager.GenerateSchema(withoutRecords, format: DBSchemaFormat.Xml);
 
         File.ReadAllText(viaFormat).ShouldStartWith("<?xml");
-        File.ReadAllText(viaFormat).ShouldBe(File.ReadAllText(viaXmlMethod));
+        File.ReadAllText(viaFormat).ShouldBe(File.ReadAllText(withoutRecords));
     }
 
     [Fact]
@@ -151,10 +151,9 @@ public class JsonSchemaTests(SqlServerFixture fixture) : DatabaseTestBase(fixtur
     {
         string file = WriteSchema("""{ "tables": [ { "name": "A", "columns": [ { "name": "Id", "dataType": "int", "options": "NULL" } ] } ] }""");
 
-        DBSchema.CheckDatabaseSchema(file, DBSchemaFormat.Json);
+        Manager.CheckDatabaseSchema(file, DBSchemaFormat.Json);
 
         Tables().ShouldBe(new[] { "A" });
-        DBSchema.DebugLog.ShouldContain("Getting DBSchema as per JSON file...");
     }
 
     [Fact]
@@ -162,21 +161,21 @@ public class JsonSchemaTests(SqlServerFixture fixture) : DatabaseTestBase(fixtur
     {
         Execute(ShopDatabase);
         string xml = TempFile();
-        DBSchema.GenerateSchemaXML(xml);
+        Manager.GenerateSchema(xml, format: DBSchemaFormat.Xml);
         string json = TempFile();
-        DBSchema.ConvertSchema(xml, json, DBSchemaFormat.Json);
+        DBSchemaManager.ConvertSchema(xml, json, DBSchemaFormat.Json);
 
         await using var fromXml = await CreateOtherDatabaseAsync();
-        DBSchema.InitializeDB(fromXml);
-        DBSchema.CheckDatabaseSchema(xml);
+        var fromXmlManager = new DBSchemaManager(fromXml);
+        fromXmlManager.CheckDatabaseSchema(xml);
         string fromXmlResult = TempFile();
-        DBSchema.GenerateSchema(fromXmlResult);
+        fromXmlManager.GenerateSchema(fromXmlResult);
 
         await using var fromJson = await CreateOtherDatabaseAsync();
-        DBSchema.InitializeDB(fromJson);
-        DBSchema.CheckDatabaseSchema(json);
+        var fromJsonManager = new DBSchemaManager(fromJson);
+        fromJsonManager.CheckDatabaseSchema(json);
         string fromJsonResult = TempFile();
-        DBSchema.GenerateSchema(fromJsonResult);
+        fromJsonManager.GenerateSchema(fromJsonResult);
 
         File.ReadAllText(fromJsonResult).ShouldBe(File.ReadAllText(fromXmlResult));
     }

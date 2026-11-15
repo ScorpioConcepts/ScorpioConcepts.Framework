@@ -6,7 +6,7 @@ using System.Linq;
 namespace ScorpioConcepts.Framework.DBSchema
 {
     /// <summary>
-    /// Parses the subset of DBML that a <see cref="DBSchema"/> can hold, and builds the schema from it.
+    /// Parses the subset of DBML that a <see cref="DBSchemaDefinition"/> can hold, and builds the schema from it.
     /// </summary>
     /// <remarks>
     /// Parsing happens first, into plain classes, so that references and records can name tables
@@ -22,19 +22,19 @@ namespace ScorpioConcepts.Framework.DBSchema
         private sealed class Setting
         {
             /// <summary>The setting name, in lower case, with multi-word names such as "not null" joined by one space</summary>
-            public string Key;
+            public string Key = "";
             /// <summary>The tokens after the ':', if any</summary>
             public List<DbmlToken> Value = new List<DbmlToken>();
             /// <summary>For an inline ref: the operator and the other end</summary>
-            public string RefOperator;
-            public Endpoint RefTarget;
+            public string? RefOperator;
+            public Endpoint? RefTarget;
             public int Line;
             public int Column;
         }
 
         private sealed class Endpoint
         {
-            public string Table;
+            public string Table = "";
             public List<string> Columns = new List<string>();
             public int Line;
             public int Column;
@@ -42,35 +42,35 @@ namespace ScorpioConcepts.Framework.DBSchema
 
         private sealed class ParsedColumn
         {
-            public string Name;
-            public string Type;
-            public List<Setting> Settings;
+            public string Name = "";
+            public string Type = "";
+            public List<Setting> Settings = new List<Setting>();
             public int Line;
             public int Column;
         }
 
         private sealed class ParsedIndexColumn
         {
-            public string Name;
+            public string Name = "";
             public bool Descending;
         }
 
         private sealed class ParsedIndex
         {
             public List<ParsedIndexColumn> Columns = new List<ParsedIndexColumn>();
-            public List<Setting> Settings;
+            public List<Setting> Settings = new List<Setting>();
             public int Line;
             public int Column;
         }
 
         private sealed class ParsedRecords
         {
-            /// <summary>The table, or null when the records are inside the table's own body</summary>
-            public string Table;
+            /// <summary>The table the records are for</summary>
+            public string Table = "";
             /// <summary>The column list, or null to use every column of the table in order</summary>
-            public List<string> Columns;
+            public List<string>? Columns;
             /// <summary>Each row's values; a null value is an empty field</summary>
-            public List<List<List<DbmlToken>>> Rows = new List<List<List<DbmlToken>>>();
+            public List<List<List<DbmlToken>?>> Rows = new List<List<List<DbmlToken>?>>();
             public bool Example;
             public int Line;
             public int Column;
@@ -78,8 +78,8 @@ namespace ScorpioConcepts.Framework.DBSchema
 
         private sealed class ParsedTable
         {
-            public string Name;
-            public string Alias;
+            public string Name = "";
+            public string? Alias;
             public List<Setting> Settings = new List<Setting>();
             public List<ParsedColumn> Columns = new List<ParsedColumn>();
             public List<ParsedIndex> Indexes = new List<ParsedIndex>();
@@ -90,10 +90,10 @@ namespace ScorpioConcepts.Framework.DBSchema
 
         private sealed class ParsedRef
         {
-            public string Name;
-            public Endpoint Left;
-            public string Operator;
-            public Endpoint Right;
+            public string? Name;
+            public Endpoint Left = new Endpoint();
+            public string Operator = "";
+            public Endpoint Right = new Endpoint();
             /// <summary>Written in a column's settings, where Left is the column itself</summary>
             public bool Inline;
             public List<Setting> Settings = new List<Setting>();
@@ -119,7 +119,7 @@ namespace ScorpioConcepts.Framework.DBSchema
         /// Read a schema from DBML text
         /// </summary>
         /// <exception cref="FormatException">The text is not valid DBML, or uses something DBSchema cannot create</exception>
-        public static DBSchema Parse(string text)
+        public static DBSchemaDefinition Parse(string text)
         {
             DbmlReader reader = new DbmlReader(DbmlLexer.Tokenize(text));
             reader.ParseProgram();
@@ -420,7 +420,7 @@ namespace ScorpioConcepts.Framework.DBSchema
                 _refs.Add(new ParsedRef
                 {
                     Left = self,
-                    Operator = setting.RefOperator,
+                    Operator = setting.RefOperator ?? "",
                     Right = setting.RefTarget,
                     Inline = true,
                     Line = setting.Line,
@@ -613,7 +613,7 @@ namespace ScorpioConcepts.Framework.DBSchema
         private void ParseRefStatement()
         {
             Next();
-            string name = null;
+            string? name = null;
             if (Peek().IsName)
             {
                 name = Next().Text;
@@ -651,7 +651,7 @@ namespace ScorpioConcepts.Framework.DBSchema
             }
         }
 
-        private void ParseRefLine(string name)
+        private void ParseRefLine(string? name)
         {
             DbmlToken start = Peek();
             ParsedRef parsed = new ParsedRef { Name = name, Line = start.Line, Column = start.Column };
@@ -742,9 +742,9 @@ namespace ScorpioConcepts.Framework.DBSchema
         }
 
         /// <summary>Everything after the records keyword: [table] [(columns)] [settings] { rows }</summary>
-        private ParsedRecords ParseRecords(string insideTable, DbmlToken keyword)
+        private ParsedRecords ParseRecords(string? insideTable, DbmlToken keyword)
         {
-            ParsedRecords records = new ParsedRecords { Table = insideTable, Line = keyword.Line, Column = keyword.Column };
+            ParsedRecords records = new ParsedRecords { Table = insideTable ?? "", Line = keyword.Line, Column = keyword.Column };
             if (insideTable == null)
             {
                 DbmlToken nameToken = Peek();
@@ -792,7 +792,7 @@ namespace ScorpioConcepts.Framework.DBSchema
                     throw Error(open, "The records of table '" + records.Table + "' are never closed with '}'");
                 }
 
-                List<List<DbmlToken>> row = new List<List<DbmlToken>>();
+                List<List<DbmlToken>?> row = new List<List<DbmlToken>?>();
                 List<DbmlToken> value = new List<DbmlToken>();
                 while (true)
                 {
@@ -827,11 +827,25 @@ namespace ScorpioConcepts.Framework.DBSchema
 
         #region Building the schema
 
-        private DBSchema Build()
+        /// <summary>A column's settings, worked out before the column is added, because the model is read-only</summary>
+        private sealed class ColumnPlan
         {
-            DBSchema schema = new DBSchema();
-            Dictionary<string, string> aliases = new Dictionary<string, string>();
-            Dictionary<string, ParsedTable> parsedTables = new Dictionary<string, ParsedTable>();
+            public ParsedColumn Parsed = new ParsedColumn();
+            public bool? NotNull;
+            public bool Identity;
+            public string? IdentitySeed;
+            public string? IdentityIncrement;
+            public string? DefaultSql;
+            public string? DefaultName;
+            public bool Persisted;
+            public bool Computed;
+        }
+
+        private DBSchemaDefinition Build()
+        {
+            var schema = new DBSchemaDefinition();
+            var aliases = new Dictionary<string, string>(SqlName.Comparer);
+            var parsedTables = new Dictionary<string, ParsedTable>(SqlName.Comparer);
 
             foreach (ParsedTable table in _tables)
             {
@@ -855,19 +869,16 @@ namespace ScorpioConcepts.Framework.DBSchema
                 BuildTable(schema, table);
             }
 
-            Func<Endpoint, string> resolve = delegate (Endpoint endpoint)
+            // A table's own name wins over an alias, and the name is used as the table defines it
+            string Resolve(string name)
             {
-                string name;
-                if (!schema.Tables.ContainsKey(endpoint.Table) && aliases.TryGetValue(endpoint.Table, out name))
-                {
-                    return name;
-                }
-                return endpoint.Table;
-            };
+                if (schema.Tables.TryGetValue(name, out DBTable? table)) return table.Name;
+                return aliases.TryGetValue(name, out string? aliased) ? aliased : name;
+            }
 
             foreach (ParsedRef parsed in _refs)
             {
-                BuildForeignKey(schema, parsed, resolve);
+                BuildForeignKey(schema, parsed, Resolve);
             }
 
             foreach (ParsedTable table in _tables)
@@ -879,9 +890,7 @@ namespace ScorpioConcepts.Framework.DBSchema
             }
             foreach (ParsedRecords records in _records)
             {
-                string tableName = resolve(new Endpoint { Table = records.Table });
-                DBTable table;
-                if (!schema.Tables.TryGetValue(tableName, out table))
+                if (!schema.Tables.TryGetValue(Resolve(records.Table), out DBTable? table))
                 {
                     throw Error(records.Line, records.Column, "The records are for table '" + records.Table + "', which is not defined");
                 }
@@ -891,17 +900,14 @@ namespace ScorpioConcepts.Framework.DBSchema
             return schema;
         }
 
-        private static void BuildTable(DBSchema schema, ParsedTable parsed)
+        private static void BuildTable(DBSchemaDefinition schema, ParsedTable parsed)
         {
-            DBTable table = schema.AddTable(parsed.Name);
-            HashSet<string> columnNames = new HashSet<string>();
-            List<string> primaryKey = new List<string>();
-            string primaryKeyName = null;
+            var columnNames = new HashSet<string>(SqlName.Comparer);
+            var plans = new List<ColumnPlan>();
+            var primaryKey = new List<string>();
+            string? primaryKeyName = null;
             bool primaryKeyFromIndex = false;
-            List<string> uniqueColumns = new List<string>();
-            List<bool?> notNull = new List<bool?>();
-            List<bool> identities = new List<bool>();
-            List<string> defaults = new List<string>();
+            var uniqueColumns = new List<string>();
 
             foreach (ParsedColumn column in parsed.Columns)
             {
@@ -909,62 +915,45 @@ namespace ScorpioConcepts.Framework.DBSchema
                 {
                     throw Error(column.Line, column.Column, "Table '" + parsed.Name + "' has more than one column called '" + column.Name + "'");
                 }
-
-                bool? columnNotNull = null;
-                bool identity = false;
-                string defaultSql = null;
-                string context = "column '" + column.Name + "' of table '" + parsed.Name + "'";
-
-                foreach (Setting setting in column.Settings)
-                {
-                    switch (setting.Key)
-                    {
-                        case "pk":
-                        case "primary key":
-                            primaryKey.Add(column.Name);
-                            break;
-                        case "not null":
-                            columnNotNull = true;
-                            break;
-                        case "null":
-                            columnNotNull = false;
-                            break;
-                        case "increment":
-                            identity = true;
-                            break;
-                        case "unique":
-                            uniqueColumns.Add(column.Name);
-                            break;
-                        case "default":
-                            defaultSql = DefaultSql(setting, context);
-                            break;
-                        case "ref":
-                            // Already turned into a relationship by AddInlineRefs
-                            break;
-                        case "check":
-                            throw Error(setting.Line, setting.Column, "Check constraints are not supported, but " + context + " has one");
-                        default:
-                            // Notes and custom properties do not change the database
-                            break;
-                    }
-                }
-
-                notNull.Add(columnNotNull);
-                identities.Add(identity);
-                defaults.Add(defaultSql);
-                table.AddColumn(column.Name, identity ? column.Type + " identity" : column.Type, "");
+                plans.Add(PlanColumn(parsed, column, primaryKey, uniqueColumns));
             }
 
             if (primaryKey.Count > 1)
             {
-                throw Error(parsed.Line, parsed.Column, "Table '" + parsed.Name + "' marks more than one column as [pk]; use indexes { (" + string.Join(", ", primaryKey.ToArray()) + ") [pk] } for a composite key");
+                throw Error(parsed.Line, parsed.Column, "Table '" + parsed.Name + "' marks more than one column as [pk]; use indexes { ("
+                    + string.Join(", ", primaryKey) + ") [pk] } for a composite key");
             }
 
+            // The table names its clustered index, because DBML has no clustered setting for an index;
+            // clustered_index: false clusters nothing
+            string? clusteredName = null;
+            bool clusterNothing = false;
+            Setting? clusteredSetting = parsed.Settings.Find(s => s.Key == "clustered_index");
+            if (clusteredSetting != null)
+            {
+                if (clusteredSetting.Value.Count == 1 && clusteredSetting.Value[0].IsKeyword("false"))
+                {
+                    clusterNothing = true;
+                }
+                else if (clusteredSetting.Value.Count == 1 && clusteredSetting.Value[0].Kind == DbmlTokenKind.String)
+                {
+                    clusteredName = clusteredSetting.Value[0].Text;
+                }
+                else
+                {
+                    // Other DBML tools only allow strings, numbers, colours and booleans in custom settings
+                    throw Error(clusteredSetting.Line, clusteredSetting.Column, "clustered_index must be an index name such as 'CIX_"
+                        + parsed.Name + "', or false to cluster nothing");
+                }
+            }
+            bool clusteredFound = false;
+
+            var indexes = new List<(string Name, bool Unique, List<ParsedIndexColumn> Columns)>();
             foreach (ParsedIndex index in parsed.Indexes)
             {
                 bool pk = false;
                 bool unique = false;
-                string name = null;
+                string? name = null;
                 foreach (Setting setting in index.Settings)
                 {
                     switch (setting.Key)
@@ -1006,11 +995,11 @@ namespace ScorpioConcepts.Framework.DBSchema
 
                 if (pk)
                 {
-                    if ((primaryKey.Count > 0) || primaryKeyFromIndex)
+                    if (primaryKey.Count > 0 || primaryKeyFromIndex)
                     {
                         throw Error(index.Line, index.Column, "Table '" + parsed.Name + "' has more than one primary key");
                     }
-                    if (index.Columns.Any(c => c.Descending))
+                    if (index.Columns.Exists(c => c.Descending))
                     {
                         throw Error(index.Line, index.Column, "A primary key cannot have a descending column");
                     }
@@ -1020,24 +1009,47 @@ namespace ScorpioConcepts.Framework.DBSchema
                     continue;
                 }
 
-                if (name == null)
-                {
-                    name = "IX_" + parsed.Name + "_" + string.Join("_", index.Columns.Select(c => c.Name).ToArray());
-                }
-                if (table.FindIndex(name) != null)
+                name ??= "IX_" + parsed.Name + "_" + string.Join("_", index.Columns.Select(c => c.Name));
+                if (indexes.Exists(i => SqlName.Equal(i.Name, name)))
                 {
                     throw Error(index.Line, index.Column, "Table '" + parsed.Name + "' has more than one index called '" + name + "'");
                 }
-                // Made clustered below, if the table's clustered_index names it
-                DBTable.Index created = table.AddIndex(name, false, unique);
+                var seen = new HashSet<string>(SqlName.Comparer);
                 foreach (ParsedIndexColumn column in index.Columns)
                 {
-                    if (created.Columns.ContainsKey(column.Name))
+                    if (!seen.Add(column.Name))
                     {
                         throw Error(index.Line, index.Column, "Index '" + name + "' lists column '" + column.Name + "' more than once");
                     }
-                    created.AddIndexColumn(column.Name, column.Descending);
                 }
+                indexes.Add((name, unique, index.Columns));
+            }
+
+            // A [unique] column gets a unique index of its own, unless it is the whole primary key already
+            foreach (string column in uniqueColumns)
+            {
+                if (primaryKey.Count == 1 && SqlName.Equal(primaryKey[0], column))
+                {
+                    continue;
+                }
+                string name = "IX_" + parsed.Name + "_" + column;
+                int existing = indexes.FindIndex(i => SqlName.Equal(i.Name, name));
+                if (existing < 0)
+                {
+                    indexes.Add((name, true, new List<ParsedIndexColumn> { new ParsedIndexColumn { Name = column } }));
+                }
+                else if (!indexes[existing].Unique || indexes[existing].Columns.Count != 1 || !SqlName.Equal(indexes[existing].Columns[0].Name, column))
+                {
+                    throw Error(parsed.Line, parsed.Column, "Column '" + column + "' of table '" + parsed.Name + "' is [unique], but its index name '" + name + "' is already used by a different index");
+                }
+            }
+
+            DBTable table = schema.AddTable(parsed.Name);
+            foreach (ColumnPlan plan in plans)
+            {
+                // Primary key and identity columns cannot hold NULL, so SQL Server makes them NOT NULL
+                bool inPrimaryKey = primaryKey.Exists(c => SqlName.Equal(c, plan.Parsed.Name));
+                table.AddColumn(plan.Parsed.Name, DataType(plan), Options(plan, inPrimaryKey));
             }
 
             if (primaryKey.Count > 0)
@@ -1045,58 +1057,145 @@ namespace ScorpioConcepts.Framework.DBSchema
                 table.PrimaryKey.Name = primaryKeyName ?? "PK_" + parsed.Name;
                 foreach (string column in primaryKey)
                 {
-                    table.PrimaryKey.AddKeyColumn(column);
+                    table.PrimaryKey.AddColumn(column);
+                }
+
+                // The primary key is clustered unless the table clusters another index, or nothing
+                bool clustered = !clusterNothing && (clusteredName == null || SqlName.Equal(clusteredName, table.PrimaryKey.Name));
+                table.PrimaryKey.Clustered = clustered;
+                clusteredFound |= clusteredName != null && clustered;
+            }
+
+            foreach ((string name, bool unique, List<ParsedIndexColumn> columns) in indexes)
+            {
+                bool clustered = clusteredName != null && SqlName.Equal(clusteredName, name);
+                clusteredFound |= clustered;
+                DBIndex index = table.AddIndex(name, clustered, unique);
+                foreach (ParsedIndexColumn column in columns)
+                {
+                    index.AddColumn(column.Name, column.Descending);
                 }
             }
 
-            foreach (Setting setting in parsed.Settings)
+            if (clusteredName != null && !clusteredFound)
             {
-                if (setting.Key != "clustered_index")
-                {
-                    continue;
-                }
-                string clusteredName = NameValue(setting, "clustered_index");
-                DBTable.Index clusteredIndex = table.FindIndex(clusteredName);
-                if (clusteredIndex != null)
-                {
-                    clusteredIndex.Clustered = true;
-                }
-                else if (clusteredName != (primaryKeyName ?? "PK_" + parsed.Name))
-                {
-                    // Naming the primary key is allowed, because DBSchema creates primary keys clustered anyway
-                    throw Error(setting.Line, setting.Column, "Table '" + parsed.Name + "' has clustered_index '" + clusteredName + "', but no index with that name");
-                }
-            }
-
-            // A [unique] column gets a unique index of its own, unless it is the whole primary key already
-            foreach (string column in uniqueColumns)
-            {
-                if ((primaryKey.Count == 1) && (primaryKey[0] == column))
-                {
-                    continue;
-                }
-                string name = "IX_" + parsed.Name + "_" + column;
-                DBTable.Index existing = table.FindIndex(name);
-                if (existing == null)
-                {
-                    table.AddIndex(name, false, true).AddIndexColumn(column, false);
-                }
-                else if (!existing.Unique || (existing.Columns.Count != 1) || !existing.Columns.ContainsKey(column))
-                {
-                    throw Error(parsed.Line, parsed.Column, "Column '" + column + "' of table '" + parsed.Name + "' is [unique], but its index name '" + name + "' is already used by a different index");
-                }
-            }
-
-            // Primary key and identity columns cannot hold NULL, so SQL Server makes them NOT NULL
-            for (int i = 0; i < table.Columns.Count; i++)
-            {
-                DBTable.Column column = table.Columns[i];
-                bool isNotNull = notNull[i] ?? (primaryKey.Contains(column.Name) || identities[i]);
-                column.Options = (isNotNull ? "NOT NULL" : "NULL") + ((defaults[i] != null) ? " DEFAULT " + defaults[i] : "");
+                throw Error(clusteredSetting!.Line, clusteredSetting.Column, "Table '" + parsed.Name + "' has clustered_index '" + clusteredName + "', but no index with that name");
             }
         }
 
-        private static void BuildForeignKey(DBSchema schema, ParsedRef parsed, Func<Endpoint, string> resolve)
+        private static ColumnPlan PlanColumn(ParsedTable table, ParsedColumn column, List<string> primaryKey, List<string> uniqueColumns)
+        {
+            var plan = new ColumnPlan { Parsed = column };
+            string context = "column '" + column.Name + "' of table '" + table.Name + "'";
+            plan.Computed = column.Type.StartsWith("AS ", StringComparison.OrdinalIgnoreCase) || column.Type.StartsWith("AS(", StringComparison.OrdinalIgnoreCase);
+            Setting? seedSetting = null;
+
+            foreach (Setting setting in column.Settings)
+            {
+                switch (setting.Key)
+                {
+                    case "pk":
+                    case "primary key":
+                        primaryKey.Add(column.Name);
+                        break;
+                    case "not null":
+                        plan.NotNull = true;
+                        break;
+                    case "null":
+                        plan.NotNull = false;
+                        break;
+                    case "increment":
+                        plan.Identity = true;
+                        break;
+                    case "identity_seed":
+                        plan.IdentitySeed = IntegerValue(setting, "identity_seed");
+                        seedSetting = setting;
+                        break;
+                    case "identity_increment":
+                        plan.IdentityIncrement = IntegerValue(setting, "identity_increment");
+                        seedSetting = setting;
+                        break;
+                    case "unique":
+                        uniqueColumns.Add(column.Name);
+                        break;
+                    case "default":
+                        plan.DefaultSql = DefaultSql(setting, context);
+                        break;
+                    case "default_name":
+                        plan.DefaultName = NameValue(setting, "default_name");
+                        break;
+                    case "persisted":
+                        plan.Persisted = BoolValue(setting, "persisted");
+                        break;
+                    case "ref":
+                        // Already turned into a relationship by AddInlineRefs
+                        break;
+                    case "check":
+                        throw Error(setting.Line, setting.Column, "Check constraints are not supported, but " + context + " has one");
+                    default:
+                        // Notes and custom properties do not change the database
+                        break;
+                }
+            }
+
+            if (seedSetting != null && !plan.Identity)
+            {
+                throw Error(seedSetting.Line, seedSetting.Column, "identity_seed and identity_increment need [increment] on " + context);
+            }
+            if (plan.DefaultName != null && plan.DefaultSql == null)
+            {
+                throw Error(column.Line, column.Column, "default_name needs a default on " + context);
+            }
+            if (plan.Computed)
+            {
+                if (plan.Identity || plan.DefaultSql != null)
+                {
+                    throw Error(column.Line, column.Column, "Computed " + context + " cannot have increment or a default");
+                }
+                if (plan.NotNull == true && !plan.Persisted)
+                {
+                    throw Error(column.Line, column.Column, "Computed " + context + " can only be not null when it is persisted");
+                }
+            }
+            else if (plan.Persisted)
+            {
+                throw Error(column.Line, column.Column, "Only a computed column, whose type is AS (expression), can be persisted, but " + context + " is not computed");
+            }
+
+            return plan;
+        }
+
+        /// <summary>The type, with identity written the way the database reads it back: identity(seed,increment) only when not 1,1</summary>
+        private static string DataType(ColumnPlan plan)
+        {
+            string type = plan.Parsed.Type;
+            if (!plan.Identity) return type;
+
+            string seed = plan.IdentitySeed ?? "1";
+            string increment = plan.IdentityIncrement ?? "1";
+            return type + " identity" + (seed != "1" || increment != "1" ? "(" + seed + "," + increment + ")" : "");
+        }
+
+        /// <summary>The options the way the database reads them back, as in NOT NULL CONSTRAINT [DF_x] DEFAULT ((0))</summary>
+        private static string Options(ColumnPlan plan, bool inPrimaryKey)
+        {
+            if (plan.Computed)
+            {
+                // NULL and NOT NULL are only allowed on a persisted computed column
+                return plan.Persisted ? (plan.NotNull == true ? "PERSISTED NOT NULL" : "PERSISTED") : "";
+            }
+
+            bool notNull = plan.NotNull ?? (inPrimaryKey || plan.Identity);
+            string options = notNull ? "NOT NULL" : "NULL";
+            if (plan.DefaultSql != null)
+            {
+                if (plan.DefaultName != null) options += " CONSTRAINT " + SqlName.Quote(plan.DefaultName);
+                options += " DEFAULT " + plan.DefaultSql;
+            }
+            return options;
+        }
+
+        private static void BuildForeignKey(DBSchemaDefinition schema, ParsedRef parsed, Func<string, string> resolve)
         {
             string op = parsed.Operator.Replace("?", "");
             Endpoint foreign;
@@ -1129,39 +1228,37 @@ namespace ScorpioConcepts.Framework.DBSchema
 
             foreach (Setting setting in parsed.Settings)
             {
-                if ((setting.Key == "delete") || (setting.Key == "update"))
+                if (setting.Key == "delete" || setting.Key == "update")
                 {
-                    string action = string.Join(" ", setting.Value.Select(t => t.Text.ToLowerInvariant()).ToArray());
+                    string action = string.Join(" ", setting.Value.Select(t => t.Text.ToLowerInvariant()));
                     if (action != "no action")
                     {
-                        throw Error(setting.Line, setting.Column, "ON " + setting.Key.ToUpperInvariant() + " " + action.ToUpperInvariant() + " is not supported; DBSchema creates foreign keys without referential actions");
+                        throw Error(setting.Line, setting.Column, "ON " + setting.Key.ToUpperInvariant() + " " + action.ToUpperInvariant()
+                            + " is not supported; DBSchema creates foreign keys without referential actions");
                     }
                 }
             }
 
-            string foreignTableName = resolve(foreign);
-            string primaryTableName = resolve(primary);
-
-            DBTable foreignTable;
-            if (!schema.Tables.TryGetValue(foreignTableName, out foreignTable))
+            if (!schema.Tables.TryGetValue(resolve(foreign.Table), out DBTable? foreignTable))
             {
                 throw Error(foreign.Line, foreign.Column, "The foreign key is on table '" + foreign.Table + "', which is not defined");
             }
             CheckColumns(foreignTable, foreign);
-            DBTable primaryTable;
-            if (schema.Tables.TryGetValue(primaryTableName, out primaryTable))
+            string primaryTableName = resolve(primary.Table);
+            if (schema.Tables.TryGetValue(primaryTableName, out DBTable? primaryTable))
             {
                 CheckColumns(primaryTable, primary);
             }
 
-            string name = parsed.Name ?? "FK_" + foreignTableName + "_" + string.Join("_", foreign.Columns.ToArray());
+            string name = parsed.Name ?? "FK_" + foreignTable.Name + "_" + string.Join("_", foreign.Columns);
             if (foreignTable.FindForeignKey(name) != null)
             {
-                throw Error(parsed.Line, parsed.Column, "Table '" + foreignTableName + "' has more than one foreign key called '" + name + "'");
+                throw Error(parsed.Line, parsed.Column, "Table '" + foreignTable.Name + "' has more than one foreign key called '" + name + "'");
             }
+            DBForeignKey foreignKey = foreignTable.AddForeignKey(name, primaryTableName);
             for (int i = 0; i < foreign.Columns.Count; i++)
             {
-                foreignTable.AddForeignKey(name, foreign.Columns[i], primaryTableName, primary.Columns[i]);
+                foreignKey.AddColumn(foreign.Columns[i], primary.Columns[i]);
             }
         }
 
@@ -1193,28 +1290,30 @@ namespace ScorpioConcepts.Framework.DBSchema
                 return;
             }
 
-            foreach (List<List<DbmlToken>> row in records.Rows)
+            foreach (List<List<DbmlToken>?> row in records.Rows)
             {
                 if (row.Count != columns.Count)
                 {
-                    DbmlToken first = row.Where(v => v != null).Select(v => v[0]).FirstOrDefault();
-                    string where = (first != null) ? "line " + first.Line.ToString(CultureInfo.InvariantCulture) : "a row";
-                    throw Error(records.Line, records.Column, "Records of table '" + table.Name + "', " + where + ": expected " + columns.Count.ToString(CultureInfo.InvariantCulture) + " values, found " + row.Count.ToString(CultureInfo.InvariantCulture));
+                    DbmlToken? first = row.Where(v => v != null).Select(v => v![0]).FirstOrDefault();
+                    string where = first != null ? "line " + first.Line.ToString(CultureInfo.InvariantCulture) : "a row";
+                    throw Error(records.Line, records.Column, "Records of table '" + table.Name + "', " + where + ": expected "
+                        + columns.Count.ToString(CultureInfo.InvariantCulture) + " values, found " + row.Count.ToString(CultureInfo.InvariantCulture));
                 }
 
                 DBDefaultRecord record = table.AddDefaultRecord();
                 for (int i = 0; i < columns.Count; i++)
                 {
+                    List<DbmlToken>? value = row[i];
                     // An empty field is NULL, as in other DBML tools
-                    if (row[i] == null)
+                    if (value == null)
                     {
                         record.AddValue(columns[i], DBNull.Value);
                     }
                     // `DEFAULT` leaves the column out of the insert, so the database fills in its default,
                     // the same as INSERT ... VALUES (DEFAULT) in the SQL other DBML tools generate
-                    else if (!IsDefaultKeyword(row[i]))
+                    else if (!IsDefaultKeyword(value))
                     {
-                        record.AddValue(columns[i], RecordValue(row[i], "column '" + columns[i] + "' of table '" + table.Name + "'"));
+                        record.AddValue(columns[i], RecordValue(value, "column '" + columns[i] + "' of table '" + table.Name + "'"));
                     }
                 }
             }
@@ -1250,7 +1349,7 @@ namespace ScorpioConcepts.Framework.DBSchema
                         break;
                 }
             }
-            else if ((value.Count == 2) && (value[0].Kind == DbmlTokenKind.Operator) && (value[0].Text == "-") && (value[1].Kind == DbmlTokenKind.Number))
+            else if (IsNegativeNumber(value))
             {
                 return "((-" + value[1].Text + "))";
             }
@@ -1258,11 +1357,14 @@ namespace ScorpioConcepts.Framework.DBSchema
             throw Error(setting.Line, setting.Column, "The default of " + context + " must be a number, a 'string', true, false, null or a `expression`");
         }
 
+        private static bool IsNegativeNumber(List<DbmlToken> value) =>
+            value.Count == 2 && value[0].Kind == DbmlTokenKind.Operator && value[0].Text == "-" && value[1].Kind == DbmlTokenKind.Number;
+
         private static object RecordValue(List<DbmlToken> value, string context)
         {
             DbmlToken token = value[0];
             bool negative = false;
-            if ((value.Count == 2) && (token.Kind == DbmlTokenKind.Operator) && (token.Text == "-") && (value[1].Kind == DbmlTokenKind.Number))
+            if (IsNegativeNumber(value))
             {
                 negative = true;
                 token = value[1];
@@ -1290,32 +1392,49 @@ namespace ScorpioConcepts.Framework.DBSchema
             throw Error(token, "The value of " + context + " must be a number, a 'string', true, false or null, found " + token.Describe());
         }
 
-        private static bool IsDefaultKeyword(List<DbmlToken> value)
-        {
-            return (value.Count == 1) && (value[0].Kind == DbmlTokenKind.Expression)
-                && string.Equals(value[0].Text.Trim(), "DEFAULT", StringComparison.OrdinalIgnoreCase);
-        }
+        private static bool IsDefaultKeyword(List<DbmlToken> value) =>
+            value.Count == 1 && value[0].Kind == DbmlTokenKind.Expression
+            && string.Equals(value[0].Text.Trim(), "DEFAULT", StringComparison.OrdinalIgnoreCase);
 
         /// <summary>Numbers get the same types the JSON reader gives them</summary>
         private static object Number(string text)
         {
-            int intValue;
-            if (int.TryParse(text, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out intValue)) return intValue;
-            long longValue;
-            if (long.TryParse(text, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out longValue)) return longValue;
-            decimal decimalValue;
+            if (int.TryParse(text, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out int intValue)) return intValue;
+            if (long.TryParse(text, NumberStyles.AllowLeadingSign, CultureInfo.InvariantCulture, out long longValue)) return longValue;
             if (!text.Contains('e') && !text.Contains('E')
-                && decimal.TryParse(text, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out decimalValue))
+                && decimal.TryParse(text, NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint, CultureInfo.InvariantCulture, out decimal decimalValue))
             {
                 return decimalValue;
             }
             return double.Parse(text, NumberStyles.Float, CultureInfo.InvariantCulture);
         }
 
+        /// <summary>A whole number, possibly negative, as identity seeds and increments are</summary>
+        private static string IntegerValue(Setting setting, string what)
+        {
+            List<DbmlToken> value = setting.Value;
+            DbmlToken? number = value.Count == 1 ? value[0] : IsNegativeNumber(value) ? value[1] : null;
+            if (number != null && number.Kind == DbmlTokenKind.Number && number.Text.All(char.IsDigit))
+            {
+                return (value.Count == 2 ? "-" : "") + number.Text;
+            }
+            throw Error(setting.Line, setting.Column, "'" + what + "' must be a whole number");
+        }
+
+        /// <summary>A true or false custom setting; other DBML tools need the value, so a bare name is not enough</summary>
+        private static bool BoolValue(Setting setting, string what)
+        {
+            if (setting.Value.Count == 1)
+            {
+                if (setting.Value[0].IsKeyword("true")) return true;
+                if (setting.Value[0].IsKeyword("false")) return false;
+            }
+            throw Error(setting.Line, setting.Column, "'" + what + "' must be true or false, as in " + what + ": true");
+        }
+
         private static string NameValue(Setting setting, string what)
         {
-            if ((setting.Value.Count == 1)
-                && ((setting.Value[0].Kind == DbmlTokenKind.String) || setting.Value[0].IsName))
+            if (setting.Value.Count == 1 && (setting.Value[0].Kind == DbmlTokenKind.String || setting.Value[0].IsName))
             {
                 return setting.Value[0].Text;
             }

@@ -1,20 +1,15 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFrameworks>net10.0;netstandard2.0</TargetFrameworks>
-    <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <PackageId>ScorpioConcepts.Framework.netNUTClient</PackageId>
     <Version>3.0.0</Version>
     <Title>Scorpio Concepts .NET NUT Client</Title>
-    <Description>Scorpio Concepts Library providing basics for a NUT client</Description>
-    <Authors>Scorpio Concepts</Authors>
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageRequireLicenseAcceptance>False</PackageRequireLicenseAcceptance>
-    <PackageProjectUrl>https://github.com/ScorpioConcepts/ScorpioConcepts.Framework</PackageProjectUrl>
-    <PackageReleaseNotes>Targets .NET 10 and .NET Standard 2.0. .NET Framework targets have been dropped.</PackageReleaseNotes>
-    <PackageVersion>3.0.0</PackageVersion>
-    <Copyright>Copyright Scorpio Concepts 2026</Copyright>
-    <RepositoryType>git</RepositoryType>
-    <RepositoryUrl>https://github.com/ScorpioConcepts/ScorpioConcepts.Framework.git</RepositoryUrl>
+    <Description>A client for upsd, the network server of Network UPS Tools (NUT): list UPS units, read and set variables, and run instant commands, with optional TLS</Description>
+    <PackageReleaseNotes>Targets .NET 10 and .NET Standard 2.0; .NET Framework targets have been dropped. Breaking changes: command arguments are validated and quoted values escaped, so values can no longer inject extra commands; a command used before Connect() throws InvalidOperationException; a reply that times out throws TimeoutException and closes the connection; Disconnect() only sends LOGOUT after Login(). New: async versions of every command with cancellation, STARTTLS, a connect timeout, IPv6 addresses, thread-safe use from several threads, and UTF-8 replies.</PackageReleaseNotes>
+    <Nullable>enable</Nullable>
   </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="ScorpioConcepts.Framework.netNUTClient.Tests" />
+  </ItemGroup>
 </Project>

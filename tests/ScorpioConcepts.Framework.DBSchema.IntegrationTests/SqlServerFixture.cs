@@ -27,6 +27,9 @@ public sealed class SqlServerFixture : IAsyncLifetime
         }
         catch (DockerUnavailableException ex)
         {
+            // CI sets this so a runner without Docker fails loudly instead of quietly skipping every test
+            if (Environment.GetEnvironmentVariable("DBSCHEMA_REQUIRE_DOCKER") == "true") throw;
+
             UnavailableReason = "Docker is not available: " + ex.Message;
         }
     }
@@ -39,6 +42,17 @@ public sealed class SqlServerFixture : IAsyncLifetime
     /// <summary>Create an empty database for one test and return an open connection to it.</summary>
     public async Task<SqlConnection> CreateDatabaseAsync()
     {
+        var connection = new SqlConnection(await CreateDatabaseConnectionStringAsync());
+        await connection.OpenAsync();
+        return connection;
+    }
+
+    /// <summary>
+    /// Create an empty database for one test and return its connection string. An open connection's
+    /// ConnectionString leaves the password out, so tests that need their own connection use this.
+    /// </summary>
+    public async Task<string> CreateDatabaseConnectionStringAsync()
+    {
         Assert.SkipWhen(UnavailableReason is not null, UnavailableReason ?? "");
 
         string name = "dbschema_" + Guid.NewGuid().ToString("N");
@@ -49,9 +63,6 @@ public sealed class SqlServerFixture : IAsyncLifetime
             await create.ExecuteNonQueryAsync();
         }
 
-        var builder = new SqlConnectionStringBuilder(_container.GetConnectionString()) { InitialCatalog = name };
-        var connection = new SqlConnection(builder.ConnectionString);
-        await connection.OpenAsync();
-        return connection;
+        return new SqlConnectionStringBuilder(_container.GetConnectionString()) { InitialCatalog = name }.ConnectionString;
     }
 }

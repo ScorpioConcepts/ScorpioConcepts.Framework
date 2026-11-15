@@ -34,7 +34,7 @@ public class CheckDatabaseSchemaTests(SqlServerFixture fixture) : DatabaseTestBa
     [Fact]
     public void Creates_missing_tables_with_columns_keys_and_indexes()
     {
-        DBSchema.CheckDatabaseSchema(WriteSchema(ShopSchema));
+        Manager.CheckDatabaseSchema(WriteSchema(ShopSchema));
 
         Tables().ShouldBe(new[] { "Customers", "Orders" });
 
@@ -53,7 +53,7 @@ public class CheckDatabaseSchemaTests(SqlServerFixture fixture) : DatabaseTestBa
     [Fact]
     public void Composite_primary_key_keeps_column_order()
     {
-        DBSchema.CheckDatabaseSchema(WriteSchema("""
+        Manager.CheckDatabaseSchema(WriteSchema("""
             <tables>
               <table name="OrderLines">
                 <column name="OrderId" datatype="int" options="NOT NULL" />
@@ -72,7 +72,7 @@ public class CheckDatabaseSchemaTests(SqlServerFixture fixture) : DatabaseTestBa
     [Fact]
     public void Creates_table_without_primary_key()
     {
-        DBSchema.CheckDatabaseSchema(WriteSchema("""
+        Manager.CheckDatabaseSchema(WriteSchema("""
             <tables>
               <table name="AuditLog">
                 <column name="Message" datatype="varchar(200)" options="NULL" />
@@ -87,7 +87,7 @@ public class CheckDatabaseSchemaTests(SqlServerFixture fixture) : DatabaseTestBa
     [Fact]
     public void Creates_clustered_index_on_table_without_primary_key()
     {
-        DBSchema.CheckDatabaseSchema(WriteSchema("""
+        Manager.CheckDatabaseSchema(WriteSchema("""
             <tables>
               <table name="Readings">
                 <column name="TakenAt" datatype="datetime" options="NOT NULL" />
@@ -105,7 +105,7 @@ public class CheckDatabaseSchemaTests(SqlServerFixture fixture) : DatabaseTestBa
     [Fact]
     public void Inserts_default_records_into_new_tables()
     {
-        DBSchema.CheckDatabaseSchema(WriteSchema("""
+        Manager.CheckDatabaseSchema(WriteSchema("""
             <tables>
               <table name="Settings">
                 <column name="Id" datatype="int" options="NOT NULL" />
@@ -142,13 +142,14 @@ public class CheckDatabaseSchemaTests(SqlServerFixture fixture) : DatabaseTestBa
               </table>
             </tables>
             """);
-        DBSchema.CheckDatabaseSchema(schema);
+        Manager.CheckDatabaseSchema(schema);
+        Log.Clear();
 
-        DBSchema.CheckDatabaseSchema(schema);
+        Manager.CheckDatabaseSchema(schema);
 
         Scalar<int>("SELECT COUNT(*) FROM Settings").ShouldBe(1);
         Indexes("Settings").ShouldBe(new[] { "IX_Settings_Id: Id" });
-        DBSchema.DebugLog.ShouldNotContain(line => line.Contains("Creating table") || line.Contains("Altering table"));
+        Log.Messages.ShouldNotContain(line => line.StartsWith("Creating"));
     }
 
     [Fact]
@@ -159,7 +160,7 @@ public class CheckDatabaseSchemaTests(SqlServerFixture fixture) : DatabaseTestBa
             INSERT INTO Customers (Id, Name) VALUES (1, 'Ada');
             """);
 
-        DBSchema.CheckDatabaseSchema(WriteSchema("""
+        Manager.CheckDatabaseSchema(WriteSchema("""
             <tables>
               <table name="Customers">
                 <column name="Id" datatype="int" options="NOT NULL" />
@@ -184,7 +185,7 @@ public class CheckDatabaseSchemaTests(SqlServerFixture fixture) : DatabaseTestBa
             CREATE TABLE Orders (Id int NOT NULL CONSTRAINT PK_Orders PRIMARY KEY, CustomerId int NOT NULL);
             """);
 
-        DBSchema.CheckDatabaseSchema(WriteSchema("""
+        Manager.CheckDatabaseSchema(WriteSchema("""
             <tables>
               <table name="Customers">
                 <column name="Id" datatype="int" options="NOT NULL" />
@@ -211,7 +212,7 @@ public class CheckDatabaseSchemaTests(SqlServerFixture fixture) : DatabaseTestBa
             CREATE TABLE Unrelated (Id int NOT NULL);
             """);
 
-        DBSchema.CheckDatabaseSchema(WriteSchema("""
+        Manager.CheckDatabaseSchema(WriteSchema("""
             <tables>
               <table name="Customers">
                 <column name="Id" datatype="int" options="NOT NULL" />
@@ -224,12 +225,12 @@ public class CheckDatabaseSchemaTests(SqlServerFixture fixture) : DatabaseTestBa
     }
 
     [Fact]
-    public void Records_what_it_did_in_DebugLog()
+    public void Logs_what_it_did()
     {
-        DBSchema.CheckDatabaseSchema(WriteSchema(ShopSchema));
+        Manager.CheckDatabaseSchema(WriteSchema(ShopSchema));
 
-        DBSchema.DebugLog.ShouldContain("Creating table Customers...");
-        DBSchema.DebugLog.ShouldContain("Creating table Orders...");
-        DBSchema.DebugLog.ShouldContain("Altering table Orders adding foreign key 'FK_Orders_Customers'...");
+        Log.Messages.ShouldContain("Creating table 'Customers'");
+        Log.Messages.ShouldContain("Creating table 'Orders'");
+        Log.Messages.ShouldContain("Creating foreign key 'FK_Orders_Customers' in table 'Orders'");
     }
 }

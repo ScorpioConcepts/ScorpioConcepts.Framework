@@ -28,7 +28,7 @@ public class FormatDataTypeTests
     [InlineData("NVARCHAR", 20, 0, 0, "NVARCHAR(10)")]
     public void Adds_the_size_for_types_that_have_one(string type, short maxLength, byte precision, byte scale, string expected)
     {
-        DBSchema.FormatDataType(type, maxLength, precision, scale, isIdentity: false).ShouldBe(expected);
+        DBSchemaManager.FormatDataType(type, maxLength, precision, scale, isIdentity: false).ShouldBe(expected);
     }
 
     [Theory]
@@ -37,6 +37,6 @@ public class FormatDataTypeTests
     [InlineData("decimal", 9, 18, 0, "decimal(18,0) identity")]
     public void Marks_identity_columns(string type, short maxLength, byte precision, byte scale, string expected)
     {
-        DBSchema.FormatDataType(type, maxLength, precision, scale, isIdentity: true).ShouldBe(expected);
+        DBSchemaManager.FormatDataType(type, maxLength, precision, scale, isIdentity: true).ShouldBe(expected);
     }
 }

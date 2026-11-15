@@ -11,30 +11,30 @@ public sealed class SchemaJsonTests : IDisposable
 
     public void Dispose() => File.Delete(_file);
 
-    private DBSchema Read(string json)
+    private DBSchemaDefinition Read(string json)
     {
         File.WriteAllText(_file, json);
         return DBSchemaJson.Read(_file);
     }
 
-    private static DBSchema ShopSchema()
+    private static DBSchemaDefinition ShopSchema()
     {
-        var schema = new DBSchema();
+        var schema = new DBSchemaDefinition();
         var customers = schema.AddTable("Customers");
         customers.AddColumn("Id", "int identity", "NOT NULL");
         customers.AddColumn("Name", "varchar(50)", "NOT NULL DEFAULT ('')");
         customers.AddColumn("Email", "nvarchar(100)", "NULL");
         customers.PrimaryKey.Name = "PK_Customers";
-        customers.PrimaryKey.AddKeyColumn("Id");
+        customers.PrimaryKey.AddColumn("Id");
         var index = customers.AddIndex("IX_Customers_Name_Email", clustered: false, unique: true);
-        index.AddIndexColumn("Name", descending: false);
-        index.AddIndexColumn("Email", descending: true);
+        index.AddColumn("Name", descending: false);
+        index.AddColumn("Email", descending: true);
 
         var orders = schema.AddTable("Orders");
         orders.AddColumn("Id", "int", "NOT NULL");
         orders.AddColumn("CustomerId", "int", "NOT NULL");
         orders.PrimaryKey.Name = "PK_Orders";
-        orders.PrimaryKey.AddKeyColumn("Id");
+        orders.PrimaryKey.AddColumn("Id");
         orders.AddForeignKey("FK_Orders_Customers", "CustomerId", "Customers", "Id");
         return schema;
     }
@@ -78,15 +78,15 @@ public sealed class SchemaJsonTests : IDisposable
             ("Email", "varchar(100)", ""),
         });
         customers.PrimaryKey.Name.ShouldBe("PK_Customers");
-        customers.PrimaryKey.KeyColumns.ShouldBe(new[] { "Id" });
+        customers.PrimaryKey.Columns.ShouldBe(new[] { "Id" });
         customers.Indexes.Select(i => (i.Name, i.Clustered, i.Unique, string.Join(",", i.Columns))).ShouldBe(new[]
         {
-            ("IX_Email", false, true, "[Email, False]"),
-            ("IX_Email_Desc", false, false, "[Email, True]"),
+            ("IX_Email", false, true, "Email"),
+            ("IX_Email_Desc", false, false, "Email DESC"),
         });
 
         var fkey = schema.Tables["Orders"].ForeignKeys.ShouldHaveSingleItem();
-        (fkey.Name, fkey.Column, fkey.PKeyTable, fkey.PKeyColumn).ShouldBe(("FK_Orders_Customers", "CustomerId", "Customers", "Id"));
+        (fkey.Name, string.Join(",", fkey.Columns), fkey.ReferencedTable, string.Join(",", fkey.ReferencedColumns)).ShouldBe(("FK_Orders_Customers", "CustomerId", "Customers", "Id"));
     }
 
     [Fact]
@@ -119,7 +119,7 @@ public sealed class SchemaJsonTests : IDisposable
         var table = Read("""{ "tables": [ { "name": "A" } ] }""").Tables["A"];
 
         table.Columns.ShouldBeEmpty();
-        table.PrimaryKey.KeyColumns.ShouldBeEmpty();
+        table.PrimaryKey.Columns.ShouldBeEmpty();
         table.Indexes.ShouldBeEmpty();
         table.ForeignKeys.ShouldBeEmpty();
         table.DefaultRecords.ShouldBeEmpty();
@@ -158,7 +158,7 @@ public sealed class SchemaJsonTests : IDisposable
     {
         var schema = ShopSchema();
 
-        DBSchemaJson.Write(schema, _file, new DBDefaultRecords());
+        DBSchemaJson.Write(schema, _file);
         var read = DBSchemaJson.Read(_file);
 
         SchemaAssert.SameStructure(read, schema);
@@ -167,7 +167,7 @@ public sealed class SchemaJsonTests : IDisposable
     [Fact]
     public void Written_file_is_readable_json_with_the_documented_shape()
     {
-        DBSchemaJson.Write(ShopSchema(), _file, new DBDefaultRecords());
+        DBSchemaJson.Write(ShopSchema(), _file);
 
         string text = File.ReadAllText(_file);
         text.ShouldContain("\"options\": \"NOT NULL DEFAULT ('')\"", customMessage: "SQL quotes should not be escaped");
@@ -187,19 +187,19 @@ public sealed class SchemaJsonTests : IDisposable
     [Fact]
     public void Table_without_primary_key_writes_no_primary_key()
     {
-        var schema = new DBSchema();
+        var schema = new DBSchemaDefinition();
         schema.AddTable("Log").AddColumn("Message", "varchar(100)", "NULL");
 
-        DBSchemaJson.Write(schema, _file, new DBDefaultRecords());
+        DBSchemaJson.Write(schema, _file);
 
         File.ReadAllText(_file).ShouldNotContain("primaryKey");
-        DBSchemaJson.Read(_file).Tables["Log"].PrimaryKey.KeyColumns.ShouldBeEmpty();
+        DBSchemaJson.Read(_file).Tables["Log"].PrimaryKey.Columns.ShouldBeEmpty();
     }
 
     [Fact]
     public void Default_record_values_keep_their_types()
     {
-        var schema = new DBSchema();
+        var schema = new DBSchemaDefinition();
         schema.AddTable("Settings").AddColumn("Id", "int", "NOT NULL");
         var defaults = new DBDefaultRecords();
         var record = defaults.AddRecord("Settings");
@@ -208,17 +208,18 @@ public sealed class SchemaJsonTests : IDisposable
         record.AddValue("Decimal", 12.50m);
         record.AddValue("Bool", true);
         record.AddValue("Text", "<needs & escaping> \"quoted\"");
-        record.AddValue("Null", null!);
+        record.AddValue("Null", null);
         record.AddValue("DBNull", DBNull.Value);
         record.AddValue("Date", new DateTime(2026, 11, 15, 8, 30, 0));
         record.AddValue("Guid", Guid.Parse("8184a1a7-2536-4da3-8408-5624ab412f4c"));
         defaults.AddRecord("NotInSchema").AddValue("Id", 1);
 
-        DBSchemaJson.Write(schema, _file, defaults);
+        schema.AddDefaultRecords(defaults);
+        DBSchemaJson.Write(schema, _file);
         var read = DBSchemaJson.Read(_file);
 
         read.Tables.Keys.ShouldBe(new[] { "Settings" });
-        read.Tables["Settings"].DefaultRecords.ShouldHaveSingleItem().Values.ShouldBe(new Dictionary<string, object>
+        read.Tables["Settings"].DefaultRecords.ShouldHaveSingleItem().Values.ShouldBe(new Dictionary<string, object?>
         {
             ["Int"] = 42,
             ["Long"] = 5_000_000_000L,
@@ -232,19 +233,12 @@ public sealed class SchemaJsonTests : IDisposable
         });
     }
 
-    [Fact]
-    public void Write_records_progress_in_DebugLog()
-    {
-        DBSchemaJson.Write(ShopSchema(), _file, new DBDefaultRecords());
-
-        DBSchema.DebugLog.ShouldContain("DB Schema JSON generated for table 'Orders'");
-    }
 }
 
 internal static class SchemaAssert
 {
     /// <summary>Compare two schemas table by table, ignoring default records.</summary>
-    public static void SameStructure(DBSchema actual, DBSchema expected)
+    public static void SameStructure(DBSchemaDefinition actual, DBSchemaDefinition expected)
     {
         actual.Tables.Keys.ShouldBe(expected.Tables.Keys);
         foreach (var e in expected.Tables.Values)
@@ -252,11 +246,11 @@ internal static class SchemaAssert
             var a = actual.Tables[e.Name];
             a.Columns.Select(c => (c.Name, c.DataType, c.Options)).ShouldBe(e.Columns.Select(c => (c.Name, c.DataType, c.Options)));
             a.PrimaryKey.Name.ShouldBe(e.PrimaryKey.Name);
-            a.PrimaryKey.KeyColumns.ShouldBe(e.PrimaryKey.KeyColumns);
+            a.PrimaryKey.Columns.ShouldBe(e.PrimaryKey.Columns);
             a.Indexes.Select(i => (i.Name, i.Clustered, i.Unique, string.Join(",", i.Columns)))
                 .ShouldBe(e.Indexes.Select(i => (i.Name, i.Clustered, i.Unique, string.Join(",", i.Columns))));
-            a.ForeignKeys.Select(f => (f.Name, f.Column, f.PKeyTable, f.PKeyColumn))
-                .ShouldBe(e.ForeignKeys.Select(f => (f.Name, f.Column, f.PKeyTable, f.PKeyColumn)));
+            a.ForeignKeys.Select(f => (f.Name, string.Join(",", f.Columns), f.ReferencedTable, string.Join(",", f.ReferencedColumns)))
+                .ShouldBe(e.ForeignKeys.Select(f => (f.Name, string.Join(",", f.Columns), f.ReferencedTable, string.Join(",", f.ReferencedColumns))));
         }
     }
 }

@@ -1,0 +1,77 @@
+name: Publish to NuGet
+
+# Publishing a GitHub Release builds, tests and packs every library, then pushes each package to
+# NuGet.org. Versions that already exist there are skipped, so only libraries whose <Version> was
+# bumped in their csproj are released.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+# Never run two publishes at the same time
+concurrency:
+  group: publish
+  cancel-in-progress: false
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DBSCHEMA_REQUIRE_DOCKER: true
+
+jobs:
+  publish:
+    name: Publish packages
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Must match the environment in the NuGet.org trusted publishing policy.
+    # Add required reviewers to this environment to approve each publish by hand.
+    environment: nuget
+    permissions:
+      contents: read
+      # Lets NuGet/login exchange a GitHub OIDC token for a short-lived NuGet.org API key
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore ScorpioConcepts.Framework.slnx
+
+      - name: Build
+        run: dotnet build ScorpioConcepts.Framework.slnx -c Release --no-restore
+
+      - name: Test
+        run: dotnet test --solution ScorpioConcepts.Framework.slnx -c Release --no-build
+
+      - name: Pack
+        run: dotnet pack ScorpioConcepts.Framework.slnx -c Release --no-build -o artifacts/packages
+
+      - name: Upload packages
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: packages
+          path: |
+            artifacts/packages/*.nupkg
+            artifacts/packages/*.snupkg
+          if-no-files-found: error
+
+      - name: Log in to NuGet.org
+        id: nuget-login
+        uses: NuGet/login@8d196754b4036150537f80ac539e15c2f1028841 # v1.2.0
+        with:
+          # The NuGet.org account that owns the packages and the trusted publishing policy
+          user: sschocke_scorpio
+
+      # Each .snupkg next to its .nupkg is pushed to the NuGet.org symbol server automatically
+      - name: Push to NuGet.org
+        run: >
+          dotnet nuget push "artifacts/packages/*.nupkg"
+          --api-key "${{ steps.nuget-login.outputs.NUGET_API_KEY }}"
+          --source https://api.nuget.org/v3/index.json
+          --skip-duplicate

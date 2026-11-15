@@ -74,8 +74,26 @@ public class UPSExceptionTests
     }
 
     [Fact]
-    public void Description_falls_back_to_code_name()
+    public void Every_code_has_its_own_readable_description()
     {
-        new UPSException(UPSException.ErrorCode.DATA_STALE, "").Description.ShouldBe("DATA_STALE");
+        var descriptions = Enum.GetValues<UPSException.ErrorCode>()
+            .ToDictionary(code => code, code => new UPSException(code, "").Description);
+
+        descriptions.Values.ShouldAllBe(d => d.Length > 0 && !d.Contains('_'));
+        descriptions.Values.Distinct().Count().ShouldBe(descriptions.Count);
+        descriptions[UPSException.ErrorCode.DATA_STALE].ShouldBe("UPS data is stale");
+        descriptions[UPSException.ErrorCode.UNKNOWN_ERROR].ShouldBe("Unknown error");
+    }
+
+    [Fact]
+    public void Standard_constructors_use_UNKNOWN_ERROR()
+    {
+        new UPSException().Code.ShouldBe(UPSException.ErrorCode.UNKNOWN_ERROR);
+        new UPSException("message").Message.ShouldBe("message");
+
+        var inner = new InvalidOperationException("inner");
+        var ex = new UPSException("outer", inner);
+        ex.Code.ShouldBe(UPSException.ErrorCode.UNKNOWN_ERROR);
+        ex.InnerException.ShouldBeSameAs(inner);
     }
 }

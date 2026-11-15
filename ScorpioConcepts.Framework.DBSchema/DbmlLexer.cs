@@ -30,7 +30,7 @@ namespace ScorpioConcepts.Framework.DBSchema
     {
         public DbmlTokenKind Kind;
         /// <summary>The value: a name or string with its quotes removed and escapes applied, or the raw text otherwise</summary>
-        public string Text;
+        public string Text = "";
         public int Line;
         public int Column;
 

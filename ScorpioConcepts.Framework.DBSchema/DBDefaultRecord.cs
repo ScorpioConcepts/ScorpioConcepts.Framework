@@ -1,82 +1,71 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.Globalization;
 using System.Linq;
 using System.Text;
 
-namespace ScorpioConcepts.Framework.DBSchema
+namespace ScorpioConcepts.Framework.DBSchema;
+
+/// <summary>
+/// A row to insert when its table is created, as column names and values.
+/// </summary>
+public sealed class DBDefaultRecord
 {
-    /// <summary>
-    /// Default Record that needs to be recorded in the database
-    /// </summary>
-    public class DBDefaultRecord
+    private readonly Dictionary<string, object?> _values = new(SqlName.Comparer);
+    private readonly List<string> _order = new();
+
+    internal DBDefaultRecord()
     {
-        /// <summary>
-        /// Dictionary of the columns and values for this Default Record
-        /// </summary>
-        public Dictionary<string, object> Values { get; private set; }
-
-        /// <summary>
-        /// Create a new Default Record
-        /// </summary>
-        public DBDefaultRecord()
-        {
-            Values = new Dictionary<string, object>();
-        }
-
-        /// <summary>
-        /// Add a new column and value to the record
-        /// </summary>
-        /// <param name="column"></param>
-        /// <param name="value"></param>
-        public void AddValue(string column, object value)
-        {
-            if (this.Values.ContainsKey(column))
-            {
-                throw new ArgumentException("Column '" + column + "' already has a value assigned", "column");
-            }
-
-            this.Values.Add(column, value);
-        }
-
-        /// <summary>
-        /// Returns the string representation of this record
-        /// </summary>
-        /// <returns></returns>
-        public override string ToString()
-        {
-            if( this.Values.Count < 1 )
-            {
-                return "DBDefaultRecord: No Data";
-            }
-            int max = this.Values.Count;
-            if (max > 2)
-            {
-                max = 2;
-            }
-
-            StringBuilder sb = new StringBuilder();
-            sb.Append("DBDefaultRecord: ");
-            int i = 0;
-            foreach(KeyValuePair<string,object> kvp in this.Values)
-            {
-                sb.Append(kvp.Key + "=" + kvp.Value.ToString());
-                i++;
-                if (i >= max)
-                {
-                    break;
-                }
-                else
-                {
-                    sb.Append(",");
-                }
-            }
-
-            if (this.Values.Count > 2)
-            {
-                sb.Append(", " + (this.Values.Count - 2).ToString() + " other...");
-            }
-
-            return sb.ToString();
-        }
+        Values = new ReadOnlyDictionary<string, object?>(_values);
+        Columns = _order.AsReadOnly();
     }
+
+    /// <summary>The column values, in the order they were added. A null value is stored as SQL <c>NULL</c>.</summary>
+    public IReadOnlyDictionary<string, object?> Values { get; }
+
+    /// <summary>The column names, in the order they were added.</summary>
+    public IReadOnlyList<string> Columns { get; }
+
+    /// <summary>Adds a column value to the record.</summary>
+    /// <param name="column">The column name.</param>
+    /// <param name="value">The value. Null and <see cref="DBNull"/> both mean SQL <c>NULL</c>.</param>
+    /// <returns>This record, so calls can be chained.</returns>
+    /// <exception cref="ArgumentException">The record already has a value for <paramref name="column"/>.</exception>
+    public DBDefaultRecord AddValue(string column, object? value)
+    {
+        if (column is null) throw new ArgumentNullException(nameof(column));
+        if (_values.ContainsKey(column))
+        {
+            throw new ArgumentException("Column '" + column + "' already has a value assigned", nameof(column));
+        }
+
+        _values.Add(column, value);
+        _order.Add(column);
+        return this;
+    }
+
+    /// <summary>The values in column order.</summary>
+    internal IEnumerable<KeyValuePair<string, object?>> OrderedValues => _order.Select(c => new KeyValuePair<string, object?>(c, _values[c]));
+
+    /// <summary>Shows the first two values, and how many more there are.</summary>
+    public override string ToString()
+    {
+        if (_order.Count == 0)
+        {
+            return "DBDefaultRecord: No Data";
+        }
+
+        var sb = new StringBuilder("DBDefaultRecord: ");
+        sb.Append(string.Join(",", OrderedValues.Take(2).Select(kvp => kvp.Key + "=" + Format(kvp.Value))));
+        if (_order.Count > 2)
+        {
+            sb.Append(", ").Append((_order.Count - 2).ToString(CultureInfo.InvariantCulture)).Append(" other...");
+        }
+
+        return sb.ToString();
+    }
+
+    private static string Format(object? value) =>
+        value is null || value is DBNull ? "NULL" : Convert.ToString(value, CultureInfo.InvariantCulture) ?? "";
 }

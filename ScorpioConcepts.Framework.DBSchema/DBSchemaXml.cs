@@ -1,282 +1,344 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Xml;
 
-namespace ScorpioConcepts.Framework.DBSchema
+namespace ScorpioConcepts.Framework.DBSchema;
+
+/// <summary>
+/// Reads and writes the original XML schema file format
+/// </summary>
+internal static class DBSchemaXml
 {
     /// <summary>
-    /// Reads and writes the original XML schema file format
+    /// Write the given schema, including each table's default records, to an XML file
     /// </summary>
-    internal static class DBSchemaXml
+    internal static void Write(DBSchemaDefinition schema, string targetFile)
     {
-        /// <summary>
-        /// Write the given Database Schema, along with the given default records, to an XML file
-        /// </summary>
-        internal static void Write(DBSchema dbSchema, string targetFile, DBDefaultRecords defaultRecords)
+        var settings = new XmlWriterSettings
         {
-            XmlWriterSettings settings = new XmlWriterSettings();
-            settings.Indent = true;
-            settings.NewLineChars = Environment.NewLine;
-            settings.NewLineHandling = NewLineHandling.Entitize;
-            settings.NewLineOnAttributes = false;
+            Indent = true,
+            NewLineChars = Environment.NewLine,
+            NewLineHandling = NewLineHandling.Entitize,
+            NewLineOnAttributes = false,
+        };
 
-            // Dispose the writer even when writing fails, so the file is not left locked
-            using (XmlWriter writer = XmlWriter.Create(targetFile, settings))
+        // Dispose the writer even when writing fails, so the file is not left locked
+        using XmlWriter writer = XmlWriter.Create(targetFile, settings);
+
+        writer.WriteStartElement("tables");
+        foreach (DBTable table in schema.TablesInOrder)
+        {
+            writer.WriteStartElement("table");
+            writer.WriteAttributeString("name", table.Name);
+
+            foreach (DBColumn column in table.Columns)
             {
-                DBSchema.DebugLog.Add("Found " + dbSchema.Tables.Count.ToString() + " Tables...");
-
-                writer.WriteStartElement("tables");
-                foreach (DBTable table in dbSchema.Tables.Values)
-                {
-                    string tableName = table.Name;
-
-                    DBSchema.DebugLog.Add("DBSchema XML for table '" + tableName + "'...");
-                    writer.WriteStartElement("table");
-                    writer.WriteAttributeString("name", tableName);
-
-                    foreach( DBTable.Column column in table.Columns)
-                    {
-                        writer.WriteStartElement("column");
-                        writer.WriteAttributeString("name", column.Name);
-                        writer.WriteAttributeString("datatype", column.DataType);
-                        writer.WriteAttributeString("options", column.Options);
-                        writer.WriteEndElement();
-                    }
-
-                    if( table.PrimaryKey.KeyColumns.Count > 0 )
-                    {
-                        writer.WriteStartElement("primary_key");
-                        writer.WriteAttributeString("name", table.PrimaryKey.Name);
-                        foreach (string keyColumn in table.PrimaryKey.KeyColumns)
-                        {
-                            writer.WriteStartElement("column");
-                            writer.WriteAttributeString("name", keyColumn);
-                            writer.WriteEndElement();
-                        }
-                        writer.WriteEndElement();
-                    }
-
-                    foreach (DBTable.Index idx in table.Indexes)
-                    {
-                        writer.WriteStartElement("index");
-                        writer.WriteAttributeString("name", idx.Name);
-                        writer.WriteAttributeString("clustered", idx.Clustered.ToString());
-                        writer.WriteAttributeString("unique", idx.Unique.ToString());
-                        foreach (KeyValuePair<string,bool> column in idx.Columns)
-                        {
-                            writer.WriteStartElement("column");
-                            writer.WriteAttributeString("name", column.Key);
-                            writer.WriteAttributeString("desc", column.Value.ToString());
-                            writer.WriteEndElement();
-                        }
-                        writer.WriteEndElement();
-                    }
-
-                    foreach( DBTable.ForeignKey fkey in table.ForeignKeys)
-                    {
-                        writer.WriteStartElement("foreign_key");
-                        writer.WriteAttributeString("name", fkey.Name);
-                        writer.WriteAttributeString("column", fkey.Column);
-                        writer.WriteAttributeString("pk_table", fkey.PKeyTable);
-                        writer.WriteAttributeString("pk_column", fkey.PKeyColumn);
-                        writer.WriteEndElement();
-                    }
-
-                    if (defaultRecords.ContainsKey(tableName))
-                    {
-                        DBSchema.DebugLog.Add("Saving Default Records for table '" + tableName + "'...");
-                        List<DBDefaultRecord> tableDefaultRecords = defaultRecords[tableName];
-                        foreach (DBDefaultRecord record in tableDefaultRecords)
-                        {
-                            writer.WriteStartElement("default_record");
-                            foreach (KeyValuePair<string, object> kvp in record.Values)
-                            {
-                                if ((kvp.Value == null) || (kvp.Value is DBNull))
-                                {
-                                    // XML has no null value, so leave the column out and let the database fill it in
-                                    continue;
-                                }
-
-                                writer.WriteStartElement("columnValue");
-                                writer.WriteAttributeString("column", kvp.Key);
-                                if (kvp.Value.GetType() == typeof(string))
-                                {
-                                    writer.WriteCData(kvp.Value.ToString());
-                                }
-                                else
-                                {
-                                    writer.WriteValue(kvp.Value);
-                                }
-                                writer.WriteEndElement();
-                            }
-                            writer.WriteEndElement();
-                        }
-                    }
-
-                    writer.WriteEndElement();
-                    DBSchema.DebugLog.Add("DB Schema XML generated for table '" + tableName + "'");
-                }
-
+                writer.WriteStartElement("column");
+                writer.WriteAttributeString("name", column.Name);
+                writer.WriteAttributeString("datatype", column.DataType);
+                writer.WriteAttributeString("options", column.Options);
                 writer.WriteEndElement();
             }
+
+            if (table.PrimaryKey.Columns.Count > 0)
+            {
+                writer.WriteStartElement("primary_key");
+                writer.WriteAttributeString("name", table.PrimaryKey.Name);
+                if (!table.PrimaryKey.Clustered)
+                {
+                    // Only written when it isn't the default, so existing files stay the same
+                    writer.WriteAttributeString("clustered", "False");
+                }
+                foreach (string keyColumn in table.PrimaryKey.Columns)
+                {
+                    writer.WriteStartElement("column");
+                    writer.WriteAttributeString("name", keyColumn);
+                    writer.WriteEndElement();
+                }
+                writer.WriteEndElement();
+            }
+
+            foreach (DBIndex index in table.Indexes)
+            {
+                writer.WriteStartElement("index");
+                writer.WriteAttributeString("name", index.Name);
+                writer.WriteAttributeString("clustered", index.Clustered.ToString());
+                writer.WriteAttributeString("unique", index.Unique.ToString());
+                foreach (DBIndexColumn column in index.Columns)
+                {
+                    writer.WriteStartElement("column");
+                    writer.WriteAttributeString("name", column.Name);
+                    writer.WriteAttributeString("desc", column.Descending.ToString());
+                    writer.WriteEndElement();
+                }
+                writer.WriteEndElement();
+            }
+
+            foreach (DBForeignKey foreignKey in table.ForeignKeys)
+            {
+                writer.WriteStartElement("foreign_key");
+                writer.WriteAttributeString("name", foreignKey.Name);
+                if (foreignKey.Columns.Count == 1)
+                {
+                    // The original single column shape, so existing files stay the same
+                    writer.WriteAttributeString("column", foreignKey.Columns[0]);
+                    writer.WriteAttributeString("pk_table", foreignKey.ReferencedTable);
+                    writer.WriteAttributeString("pk_column", foreignKey.ReferencedColumns[0]);
+                }
+                else
+                {
+                    writer.WriteAttributeString("pk_table", foreignKey.ReferencedTable);
+                    for (int i = 0; i < foreignKey.Columns.Count; i++)
+                    {
+                        writer.WriteStartElement("column");
+                        writer.WriteAttributeString("name", foreignKey.Columns[i]);
+                        writer.WriteAttributeString("pk_column", foreignKey.ReferencedColumns[i]);
+                        writer.WriteEndElement();
+                    }
+                }
+                writer.WriteEndElement();
+            }
+
+            foreach (DBDefaultRecord record in table.DefaultRecords)
+            {
+                writer.WriteStartElement("default_record");
+                foreach (KeyValuePair<string, object?> kvp in record.OrderedValues)
+                {
+                    if (kvp.Value is null || kvp.Value is DBNull)
+                    {
+                        // XML has no null value, so leave the column out and let the database fill it in
+                        continue;
+                    }
+
+                    writer.WriteStartElement("columnValue");
+                    writer.WriteAttributeString("column", kvp.Key);
+                    if (kvp.Value is string text)
+                    {
+                        writer.WriteCData(text);
+                    }
+                    else
+                    {
+                        writer.WriteValue(kvp.Value);
+                    }
+                    writer.WriteEndElement();
+                }
+                writer.WriteEndElement();
+            }
+
+            writer.WriteEndElement();
         }
 
-        /// <summary>
-        /// Read a schema from an XML file
-        /// </summary>
-        internal static DBSchema Read(string schemaXMLFile)
+        writer.WriteEndElement();
+    }
+
+    /// <summary>
+    /// Read a schema from an XML file
+    /// </summary>
+    /// <exception cref="FormatException">A required attribute is missing.</exception>
+    internal static DBSchemaDefinition Read(string schemaXMLFile)
+    {
+        var schema = new DBSchemaDefinition();
+        var settings = new XmlReaderSettings { IgnoreWhitespace = true };
+
+        // Dispose the reader even when parsing fails, so the file is not left locked
+        using XmlReader reader = XmlReader.Create(schemaXMLFile, settings);
+
+        reader.MoveToContent();
+        if (reader.IsEmptyElement)
         {
-            DBSchema xmlSchema = new DBSchema();
+            // <tables />
+            reader.ReadStartElement("tables");
+            return schema;
+        }
 
-            XmlReaderSettings settings = new XmlReaderSettings();
-            settings.IgnoreWhitespace = true;
-
-            // Dispose the reader even when parsing fails, so the file is not left locked
-            using (XmlReader reader = XmlReader.Create(schemaXMLFile, settings))
+        reader.ReadStartElement("tables");
+        while (reader.NodeType == XmlNodeType.Element)
+        {
+            if (reader.Name != "table")
             {
-                reader.MoveToContent();
-                if (reader.IsEmptyElement)
-                {
-                    // <tables />
-                    reader.ReadStartElement("tables");
-                    return xmlSchema;
-                }
+                // Unknown elements are ignored, so newer files can still be read
+                reader.Skip();
+                continue;
+            }
 
-                reader.ReadStartElement("tables");
-                while (reader.NodeType == XmlNodeType.Element)
+            DBTable table = schema.AddTable(RequiredAttribute(reader, "name", "a <table>"));
+            if (reader.IsEmptyElement)
+            {
+                // <table name="..." /> has no children to read
+                reader.Read();
+                continue;
+            }
+
+            reader.ReadStartElement();
+            while (reader.NodeType == XmlNodeType.Element)
+            {
+                switch (reader.Name)
                 {
-                    if (reader.Name != "table")
-                    {
-                        // Unknown elements are ignored, so newer files can still be read
+                    case "column":
+                        ReadColumn(reader, table);
+                        break;
+                    case "primary_key":
+                        ReadPrimaryKey(reader, table);
+                        break;
+                    case "index":
+                        ReadIndex(reader, table);
+                        break;
+                    case "foreign_key":
+                        ReadForeignKey(reader, table);
+                        break;
+                    case "default_record":
+                        ReadDefaultRecord(reader, table);
+                        break;
+                    default:
+                        // Without this an unknown element was never consumed and the loop never ended
                         reader.Skip();
-                        continue;
-                    }
-
-                    DBTable table = xmlSchema.AddTable(reader.GetAttribute("name"));
-                    if (reader.IsEmptyElement)
-                    {
-                        // <table name="..." /> has no children to read
-                        reader.Read();
-                        continue;
-                    }
-
-                    reader.ReadStartElement();
-                    while (reader.NodeType == XmlNodeType.Element)
-                    {
-                        switch (reader.Name)
-                        {
-                            case "column":
-                                populateXMLColumn(reader, table);
-                                break;
-                            case "primary_key":
-                                populateXMLPrimaryKey(reader, table);
-                                break;
-                            case "index":
-                                populateXMLIndex(reader, table);
-                                break;
-                            case "foreign_key":
-                                populateXMLForeignKey(reader, table);
-                                break;
-                            case "default_record":
-                                populateXMLDefaultRecord(reader, table);
-                                break;
-                            default:
-                                // Without this an unknown element was never consumed and the loop never ended
-                                reader.Skip();
-                                break;
-                        }
-                    }
-                    reader.ReadEndElement();
-                }
-                reader.ReadEndElement();
-            }
-
-            return xmlSchema;
-        }
-
-        private static void populateXMLDefaultRecord(XmlReader reader, DBTable table)
-        {
-            reader.ReadStartElement();
-            DBDefaultRecord rec = table.AddDefaultRecord();
-
-            while ((reader.NodeType == XmlNodeType.Element) && (reader.Name == "columnValue"))
-            {
-                String recColumnName = reader.GetAttribute("column");
-                reader.ReadStartElement();
-                object recData = reader.ReadContentAsObject();
-                rec.AddValue(recColumnName, recData);
-
-                if ((reader.NodeType == XmlNodeType.EndElement) && (reader.Name == "columnValue"))
-                {
-                    reader.ReadEndElement();
+                        break;
                 }
             }
             reader.ReadEndElement();
         }
-        private static void populateXMLIndex(XmlReader reader, DBTable table)
+        reader.ReadEndElement();
+
+        return schema;
+    }
+
+    private static string RequiredAttribute(XmlReader reader, string name, string element)
+    {
+        string? value = reader.GetAttribute(name);
+        if (string.IsNullOrEmpty(value))
         {
-            string idxName = reader.GetAttribute("name");
-            bool idxClustered = Boolean.Parse(reader.GetAttribute("clustered").ToString());
-            bool idxUnique = Boolean.Parse(reader.GetAttribute("unique").ToString());
-            reader.ReadStartElement();
+            throw new FormatException("The \"" + name + "\" attribute is missing for " + element);
+        }
 
-            DBTable.Index idx = table.AddIndex(idxName, idxClustered, idxUnique);
+        return value!;
+    }
 
-            while ((reader.NodeType == XmlNodeType.Element) && (reader.Name == "column"))
-            {
-                String idxColumnName = reader.GetAttribute("name");
-                bool idxColumnDesc = Boolean.Parse(reader.GetAttribute("desc").ToString());
-                idx.AddIndexColumn(idxColumnName, idxColumnDesc);
-                reader.ReadStartElement();
-                if ((reader.NodeType == XmlNodeType.EndElement) && (reader.Name == "column"))
-                {
-                    reader.ReadEndElement();
-                }
-            }
+    private static bool BoolAttribute(XmlReader reader, string name)
+    {
+        string? value = reader.GetAttribute(name);
+        return value is not null && bool.Parse(value);
+    }
+
+    /// <summary>Moves past an element whose children have been read, or that had none.</summary>
+    private static void EndElement(XmlReader reader, string name)
+    {
+        reader.ReadStartElement();
+        if (reader.NodeType == XmlNodeType.EndElement && reader.Name == name)
+        {
             reader.ReadEndElement();
         }
-        private static void populateXMLForeignKey(XmlReader reader, DBTable table)
-        {
-            string fkeyName = reader.GetAttribute("name");
-            string fkeyColumn = reader.GetAttribute("column");
-            string fkeyPKeyTable = reader.GetAttribute("pk_table");
-            string fkeyPKeyColumn = reader.GetAttribute("pk_column");
-            table.AddForeignKey(fkeyName, fkeyColumn, fkeyPKeyTable, fkeyPKeyColumn);
+    }
 
+    private static void ReadDefaultRecord(XmlReader reader, DBTable table)
+    {
+        DBDefaultRecord record = table.AddDefaultRecord();
+        if (reader.IsEmptyElement)
+        {
+            reader.Read();
+            return;
+        }
+
+        reader.ReadStartElement();
+        while (reader.NodeType == XmlNodeType.Element && reader.Name == "columnValue")
+        {
+            string column = RequiredAttribute(reader, "column", "a <columnValue> in table '" + table.Name + "'");
             reader.ReadStartElement();
-            if ((reader.NodeType == XmlNodeType.EndElement) && (reader.Name == "foreign_key"))
+            record.AddValue(column, reader.ReadContentAsObject());
+
+            if (reader.NodeType == XmlNodeType.EndElement && reader.Name == "columnValue")
             {
                 reader.ReadEndElement();
             }
         }
-        private static void populateXMLPrimaryKey(XmlReader reader, DBTable table)
+        reader.ReadEndElement();
+    }
+
+    private static void ReadIndex(XmlReader reader, DBTable table)
+    {
+        string context = "an <index> in table '" + table.Name + "'";
+        DBIndex index = table.AddIndex(RequiredAttribute(reader, "name", context), BoolAttribute(reader, "clustered"), BoolAttribute(reader, "unique"));
+        if (reader.IsEmptyElement)
         {
-            table.PrimaryKey.Name = reader.GetAttribute("name");
+            reader.Read();
+            return;
+        }
+
+        reader.ReadStartElement();
+        while (reader.NodeType == XmlNodeType.Element && reader.Name == "column")
+        {
+            index.AddColumn(RequiredAttribute(reader, "name", "a column of " + context), BoolAttribute(reader, "desc"));
+            EndElement(reader, "column");
+        }
+        reader.ReadEndElement();
+    }
+
+    private static void ReadForeignKey(XmlReader reader, DBTable table)
+    {
+        string context = "a <foreign_key> in table '" + table.Name + "'";
+        DBForeignKey foreignKey = table.AddForeignKey(RequiredAttribute(reader, "name", context), RequiredAttribute(reader, "pk_table", context));
+
+        // One column as column="..." pk_column="...", or several as <column name="..." pk_column="..." /> children
+        string? column = reader.GetAttribute("column");
+        if (column is not null)
+        {
+            foreignKey.AddColumn(column, RequiredAttribute(reader, "pk_column", context));
+        }
+
+        if (reader.IsEmptyElement)
+        {
+            reader.Read();
+        }
+        else
+        {
             reader.ReadStartElement();
-            while ((reader.NodeType == XmlNodeType.Element) && (reader.Name == "column"))
+            while (reader.NodeType == XmlNodeType.Element)
             {
-                String pkeyColumnName = reader.GetAttribute("name");
-                table.PrimaryKey.AddKeyColumn(pkeyColumnName);
-                reader.ReadStartElement();
-                if ((reader.NodeType == XmlNodeType.EndElement) && (reader.Name == "column"))
+                if (reader.Name == "column")
                 {
-                    reader.ReadEndElement();
+                    foreignKey.AddColumn(RequiredAttribute(reader, "name", "a column of " + context), RequiredAttribute(reader, "pk_column", "a column of " + context));
+                    EndElement(reader, "column");
+                }
+                else
+                {
+                    reader.Skip();
                 }
             }
             reader.ReadEndElement();
         }
-        private static void populateXMLColumn(XmlReader reader, DBTable table)
-        {
-            string columnName = reader.GetAttribute("name");
-            string columnDataType = reader.GetAttribute("datatype");
-            string columnOptions = reader.GetAttribute("options");
-            table.AddColumn(columnName, columnDataType, columnOptions);
 
-            reader.ReadStartElement();
-            if ((reader.NodeType == XmlNodeType.EndElement) && (reader.Name == "column"))
-            {
-                reader.ReadEndElement();
-            }
+        if (foreignKey.Columns.Count == 0)
+        {
+            throw new FormatException("Foreign key '" + foreignKey.Name + "' in table '" + table.Name + "' has no columns");
         }
+    }
+
+    private static void ReadPrimaryKey(XmlReader reader, DBTable table)
+    {
+        table.PrimaryKey.Name = reader.GetAttribute("name");
+        table.PrimaryKey.Clustered = reader.GetAttribute("clustered") is not string clustered || bool.Parse(clustered);
+        if (reader.IsEmptyElement)
+        {
+            reader.Read();
+            return;
+        }
+
+        reader.ReadStartElement();
+        while (reader.NodeType == XmlNodeType.Element && reader.Name == "column")
+        {
+            table.PrimaryKey.AddColumn(RequiredAttribute(reader, "name", "a primary key column in table '" + table.Name + "'"));
+            EndElement(reader, "column");
+        }
+        reader.ReadEndElement();
+    }
+
+    private static void ReadColumn(XmlReader reader, DBTable table)
+    {
+        string context = "a <column> in table '" + table.Name + "'";
+        table.AddColumn(
+            RequiredAttribute(reader, "name", context),
+            RequiredAttribute(reader, "datatype", context),
+            reader.GetAttribute("options") ?? string.Empty);
+        EndElement(reader, "column");
     }
 }

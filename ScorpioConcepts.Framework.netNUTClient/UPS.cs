@@ -60,7 +60,7 @@ namespace ScorpioConcepts.Framework.netNUTClient
         /// <summary>
         /// Description of the UPS
         /// </summary>
-        public string Description { get; set; }
+        public string Description { get; set; } = string.Empty;
         /// <summary>
         /// UPSD Host Address
         /// </summary>
@@ -72,10 +72,16 @@ namespace ScorpioConcepts.Framework.netNUTClient
         /// <param name="upsDefinition">UPS definition string in format &lt;upsname&gt;[@&lt;hostname&gt;[:&lt;port&gt;]]</param>
         public UPS(string upsDefinition)
         {
-            if( upsDefinition.Contains("@"))
+            if (upsDefinition == null)
             {
-                this.Host = upsDefinition.Substring(upsDefinition.IndexOf('@') + 1);
-                this.Name = upsDefinition.Substring(0, upsDefinition.IndexOf('@'));
+                throw new ArgumentNullException(nameof(upsDefinition));
+            }
+
+            int at = upsDefinition.IndexOf('@');
+            if (at >= 0)
+            {
+                this.Host = upsDefinition.Substring(at + 1);
+                this.Name = upsDefinition.Substring(0, at);
             }
             else
             {

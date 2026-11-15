@@ -21,15 +21,18 @@ internal static class PlugInCompiler
 
         """;
 
-    /// <summary>Compile <paramref name="source"/> into a uniquely named DLL in <paramref name="directory"/>.</summary>
-    public static string Compile(string directory, string source)
+    /// <summary>
+    /// Compile <paramref name="source"/> into a DLL in <paramref name="directory"/>. Without
+    /// <paramref name="assemblyName"/>, the assembly gets a unique name, so tests never load two assemblies with
+    /// the same name by accident. <paramref name="references"/> are other compiled DLLs the source uses.
+    /// </summary>
+    public static string Compile(string directory, string source, string? assemblyName = null, params string[] references)
     {
-        // Every assembly gets a unique name: the default load context can only hold one assembly per name.
-        string name = "SamplePlugIns_" + Guid.NewGuid().ToString("N");
+        string name = assemblyName ?? "SamplePlugIns_" + Guid.NewGuid().ToString("N");
         var compilation = CSharpCompilation.Create(
             name,
             [CSharpSyntaxTree.ParseText(Usings + source)],
-            References.Value,
+            References.Value.Concat(references.Select(r => MetadataReference.CreateFromFile(r))),
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, nullableContextOptions: NullableContextOptions.Disable));
 
         string path = Path.Combine(directory, name + ".dll");
