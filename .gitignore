@@ -159,3 +159,6 @@ $RECYCLE.BIN/
 
 # Build output from CI and local dotnet pack / dotnet test runs
 artifacts/
+
+# Local git worktrees created by Claude Code sessions
+.claude/worktrees/
