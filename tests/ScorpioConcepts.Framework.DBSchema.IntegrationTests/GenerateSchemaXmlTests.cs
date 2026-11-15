@@ -22,8 +22,8 @@ public class GenerateSchemaXmlTests(SqlServerFixture fixture) : DatabaseTestBase
     private XElement Generate(DBDefaultRecords? defaults = null)
     {
         string file = TempFile();
-        if (defaults is null) DBSchema.GenerateSchemaXML(file);
-        else DBSchema.GenerateSchemaXML(file, defaults);
+        if (defaults is null) Manager.GenerateSchema(file, format: DBSchemaFormat.Xml);
+        else Manager.GenerateSchema(file, defaults, DBSchemaFormat.Xml);
         return XElement.Load(file);
     }
 
@@ -91,15 +91,15 @@ public class GenerateSchemaXmlTests(SqlServerFixture fixture) : DatabaseTestBase
     {
         Execute(ShopDatabase);
         string file = TempFile();
-        DBSchema.GenerateSchemaXML(file);
+        Manager.GenerateSchema(file, format: DBSchemaFormat.Xml);
         string original = File.ReadAllText(file);
 
         await using var copy = await CreateOtherDatabaseAsync();
-        DBSchema.InitializeDB(copy);
-        DBSchema.CheckDatabaseSchema(file);
+        var copyManager = new DBSchemaManager(copy);
+        copyManager.CheckDatabaseSchema(file);
 
         string copyFile = TempFile();
-        DBSchema.GenerateSchemaXML(copyFile);
+        copyManager.GenerateSchema(copyFile, format: DBSchemaFormat.Xml);
         File.ReadAllText(copyFile).ShouldBe(original);
     }
 
@@ -142,14 +142,14 @@ public class GenerateSchemaXmlTests(SqlServerFixture fixture) : DatabaseTestBase
     {
         Execute(AllSizedTypes);
         string file = TempFile();
-        DBSchema.GenerateSchemaXML(file);
+        Manager.GenerateSchema(file, format: DBSchemaFormat.Xml);
 
         await using var copy = await CreateOtherDatabaseAsync();
-        DBSchema.InitializeDB(copy);
-        DBSchema.CheckDatabaseSchema(file);
+        var copyManager = new DBSchemaManager(copy);
+        copyManager.CheckDatabaseSchema(file);
 
         string copyFile = TempFile();
-        DBSchema.GenerateSchemaXML(copyFile);
+        copyManager.GenerateSchema(copyFile, format: DBSchemaFormat.Xml);
         File.ReadAllText(copyFile).ShouldBe(File.ReadAllText(file));
     }
 

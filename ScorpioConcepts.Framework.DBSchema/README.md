@@ -13,17 +13,52 @@ using Microsoft.Data.SqlClient;
 using ScorpioConcepts.Framework.DBSchema;
 
 using var connection = new SqlConnection(connectionString);
-connection.Open();
-DBSchema.InitializeDB(connection);
+var schema = new DBSchemaManager(connection, logger);   // the logger is optional
 
 // Bring the database up to date with the schema file
-DBSchema.CheckDatabaseSchema("schema.json");
+schema.CheckDatabaseSchema("schema.json");
 
 // Or create a schema file from an existing database
-DBSchema.GenerateSchema("schema.json");
+schema.GenerateSchema("schema.json");
 ```
 
-`DBSchema.DebugLog` records what was done, which is useful when something does not look right.
+Each `DBSchemaManager` works on the database its connection points to, so an application can keep several
+databases up to date side by side. The connection can be open or closed: a closed one is opened for each call and
+closed again afterwards. The manager never disposes the connection.
+
+## Logging
+Pass any `Microsoft.Extensions.Logging.ILogger` to the constructor to see what the manager does. Changes to the
+database (tables, columns, indexes, foreign keys and default records being created) are logged at `Information`,
+and reading the database's structure at `Debug`. Without a logger, nothing is logged.
+
+```csharp
+var schema = new DBSchemaManager(connection, loggerFactory.CreateLogger<DBSchemaManager>());
+```
+
+## Working with a schema in code
+`DBSchemaDefinition` is the structure of a database: its `Tables`, each with read-only lists of `Columns`,
+`Indexes`, `ForeignKeys` and `DefaultRecords`, and a `PrimaryKey`.
+
+```csharp
+DBSchemaDefinition fromFile = DBSchemaDefinition.Load("schema.json");   // JSON or XML, detected from the content
+DBSchemaDefinition fromDatabase = schema.ReadDatabaseSchema();
+
+foreach (DBTable table in fromFile.TablesInOrder)
+{
+    if (!fromDatabase.Tables.ContainsKey(table.Name)) Console.WriteLine(table.Name + " will be created");
+}
+
+schema.CheckDatabaseSchema(fromFile);
+fromDatabase.Save("current.json");
+```
+
+To include default records when generating a schema file, build them with `DBDefaultRecords`:
+
+```csharp
+var defaults = new DBDefaultRecords();
+defaults.AddRecord("Customers").AddValue("Name", "Walk-in customer").AddValue("Email", null);
+schema.GenerateSchema("schema.json", defaults);
+```
 
 ## Schema files
 New schema files are written as JSON. Only a table's `name` and its `columns` are required:
@@ -69,13 +104,45 @@ New schema files are written as JSON. Only a table's `name` and its `columns` ar
 
 ## Existing XML schema files
 The original XML format is still fully supported. `CheckDatabaseSchema` detects whether a file is JSON or XML from its content,
-so existing XML schema files keep working unchanged, and `GenerateSchemaXML` still writes XML.
+so existing XML schema files keep working unchanged, and `GenerateSchema` still writes XML when asked:
+
+```csharp
+schema.GenerateSchema("schema.xml", format: DBSchemaFormat.Xml);
+```
 
 To move an XML schema to JSON, convert it once. No database connection is needed:
 
 ```csharp
-DBSchema.ConvertSchema("schema.xml", "schema.json", DBSchemaFormat.Json);
+DBSchemaManager.ConvertSchema("schema.xml", "schema.json", DBSchemaFormat.Json);
 ```
 
 XML stores every default record value as text, so after converting, the values in the JSON file are strings.
 SQL Server converts them to the column types when the records are inserted.
+
+## .NET 10 and .NET Standard 2.0
+The package has two builds:
+- **.NET 10** uses Microsoft.Data.SqlClient 7.x, the current line. Use it wherever you can.
+- **.NET Standard 2.0** is there so applications on .NET 8 or older, and .NET Framework, can still use the
+  library. It has to use Microsoft.Data.SqlClient 5.2.x, because later versions no longer support .NET Standard.
+
+> [!WARNING]
+> The 5.2 line of Microsoft.Data.SqlClient is older than the one the .NET 10 build uses, and may not get future
+> security fixes. Treat the .NET Standard build as a way to keep running while you move to .NET 10, not as a
+> long-term choice.
+
+## Upgrading from the static API
+Version 2.0 replaces the static `DBSchema` class with `DBSchemaManager`:
+
+| Before | Now |
+| --- | --- |
+| `DBSchema.InitializeDB(connection)` | `var schema = new DBSchemaManager(connection, logger)` |
+| `DBSchema.CheckDatabaseSchema(file)` | `schema.CheckDatabaseSchema(file)` |
+| `DBSchema.GenerateSchema(file, defaults)` | `schema.GenerateSchema(file, defaults)` |
+| `DBSchema.GenerateSchemaXML(file, defaults)` | `schema.GenerateSchema(file, defaults, DBSchemaFormat.Xml)` |
+| `DBSchema.ConvertSchema(...)` | `DBSchemaManager.ConvertSchema(...)` |
+| `DBSchema.DebugLog` | an `ILogger` passed to the constructor |
+| `DBTable.Column`, `DBTable.PKey`, `DBTable.Index`, `DBTable.ForeignKey` | `DBColumn`, `DBPrimaryKey`, `DBIndex`, `DBForeignKey` |
+| `PKey.KeyColumns`, `Index.Columns` (a dictionary) | `DBPrimaryKey.Columns`, `DBIndex.Columns` (a list of `DBIndexColumn`) |
+| `ForeignKey.PKeyTable`, `ForeignKey.PKeyColumn` | `DBForeignKey.ReferencedTable`, `DBForeignKey.ReferencedColumn` |
+
+Schema files don't change: files written by earlier versions read exactly as before.

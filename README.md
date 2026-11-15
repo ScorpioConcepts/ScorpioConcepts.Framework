@@ -6,7 +6,7 @@ Feel free to use them, or to modify them. If you make a contribution and think i
 Starting from the simplest:
 
 ## 1. ScorpioConcepts.Framework.LogServer
-This simple library creates a logging target to send anything you want to log to. It then creates a listening TCP port(default 446, but can be passed in as a parameter). Simply use your favourite telnet client to connect to the port, and you can watch a live log of what your application is doing. Great for debugging things like Windows Services.
+This simple library creates a logging target to send anything you want to log to. It then listens on a TCP port (7446 by default, or pass the address and port to listen on). Simply use your favourite telnet client to connect to the port, and you can watch a live log of what your application is doing. Great for debugging things like Windows Services.
 
 _See the documentation in the folder for more details if you are interested in using it._
 
@@ -22,6 +22,6 @@ _See the documentation in the folder for more details if you are interested in u
 
 ## 4. ScorpioConcepts.Framework.DBSchema
 This is a project I have been working on a long time. The tl;dr version is it's a library where you define your database structure in a JSON file (or, for existing schemas, an XML file), and this library will automatically ensure that your actual database matches it. If you need to add a column, simply define it in the schema file, and when you run the app, this
-library will compare the actual database with what the schema file says, and make any structural changes required. This is NOT a ORM library, or something like Entity Framework. It only deals in the structure of the database, not any data.
+library will compare the actual database with what the schema file says, and make any structural changes required. Create a `DBSchemaManager` for each database, with an optional `ILogger` to see what it changes. This is NOT a ORM library, or something like Entity Framework. It only deals in the structure of the database, not any data.
 
 _See the documentation in the folder for more details if you are interested in using it._
