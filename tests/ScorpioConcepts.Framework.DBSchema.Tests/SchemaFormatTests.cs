@@ -36,21 +36,21 @@ public sealed class SchemaFormatTests : IDisposable
     [InlineData("\n\n  <tables />", DBSchemaFormat.Xml)]
     public void Detects_format_from_content(string content, DBSchemaFormat expected)
     {
-        DBSchema.DetectFormat(WriteFile(content)).ShouldBe(expected);
+        DBSchemaDefinition.DetectFormat(WriteFile(content)).ShouldBe(expected);
     }
 
     [Fact]
     public void Detects_format_after_a_byte_order_mark()
     {
-        DBSchema.DetectFormat(WriteFile("{}", new UTF8Encoding(encoderShouldEmitUTF8Identifier: true))).ShouldBe(DBSchemaFormat.Json);
-        DBSchema.DetectFormat(WriteFile("<tables />", new UTF8Encoding(encoderShouldEmitUTF8Identifier: true))).ShouldBe(DBSchemaFormat.Xml);
+        DBSchemaDefinition.DetectFormat(WriteFile("{}", new UTF8Encoding(encoderShouldEmitUTF8Identifier: true))).ShouldBe(DBSchemaFormat.Json);
+        DBSchemaDefinition.DetectFormat(WriteFile("<tables />", new UTF8Encoding(encoderShouldEmitUTF8Identifier: true))).ShouldBe(DBSchemaFormat.Xml);
     }
 
     [Fact]
     public void Content_wins_over_a_misleading_file_extension()
     {
-        DBSchema.DetectFormat(WriteFile("<tables />", extension: ".json")).ShouldBe(DBSchemaFormat.Xml);
-        DBSchema.DetectFormat(WriteFile("{}", extension: ".xml")).ShouldBe(DBSchemaFormat.Json);
+        DBSchemaDefinition.DetectFormat(WriteFile("<tables />", extension: ".json")).ShouldBe(DBSchemaFormat.Xml);
+        DBSchemaDefinition.DetectFormat(WriteFile("{}", extension: ".xml")).ShouldBe(DBSchemaFormat.Json);
     }
 
     [Theory]
@@ -61,7 +61,7 @@ public sealed class SchemaFormatTests : IDisposable
     {
         string path = WriteFile(content);
 
-        Should.Throw<FormatException>(() => DBSchema.DetectFormat(path)).Message.ShouldContain(path);
+        Should.Throw<FormatException>(() => DBSchemaDefinition.DetectFormat(path)).Message.ShouldContain(path);
     }
 
     [Fact]
@@ -83,14 +83,14 @@ public sealed class SchemaFormatTests : IDisposable
             """);
         string json = TempFile(".json");
 
-        DBSchema.ConvertSchema(xml, json, DBSchemaFormat.Json);
+        DBSchemaManager.ConvertSchema(xml, json, DBSchemaFormat.Json);
 
-        DBSchema.DetectFormat(json).ShouldBe(DBSchemaFormat.Json);
+        DBSchemaDefinition.DetectFormat(json).ShouldBe(DBSchemaFormat.Json);
         var converted = DBSchemaJson.Read(json);
         SchemaAssert.SameStructure(converted, DBSchemaXml.Read(xml));
         // XML values are untyped, so they arrive in JSON as strings
         converted.Tables["Settings"].DefaultRecords.ShouldHaveSingleItem().Values
-            .ShouldBe(new Dictionary<string, object> { ["Id"] = "1", ["Name"] = "Theme" });
+            .ShouldBe(new Dictionary<string, object?> { ["Id"] = "1", ["Name"] = "Theme" });
     }
 
     [Fact]
@@ -110,28 +110,29 @@ public sealed class SchemaFormatTests : IDisposable
             """);
         string xml = TempFile(".xml");
 
-        DBSchema.ConvertSchema(json, xml, DBSchemaFormat.Xml);
+        DBSchemaManager.ConvertSchema(json, xml, DBSchemaFormat.Xml);
 
         var converted = DBSchemaXml.Read(xml);
         SchemaAssert.SameStructure(converted, DBSchemaJson.Read(json));
         // XML cannot hold null, so the null column is left out of the record
         converted.Tables["Orders"].DefaultRecords.ShouldHaveSingleItem().Values
-            .ShouldBe(new Dictionary<string, object> { ["Id"] = "1" });
+            .ShouldBe(new Dictionary<string, object?> { ["Id"] = "1" });
     }
 
     [Fact]
     public void Xml_writer_skips_null_default_values()
     {
-        var schema = new DBSchema();
+        var schema = new DBSchemaDefinition();
         schema.AddTable("Settings").AddColumn("Id", "int", "NOT NULL");
         var defaults = new DBDefaultRecords();
         var record = defaults.AddRecord("Settings");
         record.AddValue("Id", 1);
-        record.AddValue("Missing", null!);
+        record.AddValue("Missing", null);
         record.AddValue("AlsoMissing", DBNull.Value);
         string xml = TempFile(".xml");
 
-        DBSchemaXml.Write(schema, xml, defaults);
+        schema.AddDefaultRecords(defaults);
+        DBSchemaXml.Write(schema, xml);
 
         DBSchemaXml.Read(xml).Tables["Settings"].DefaultRecords.ShouldHaveSingleItem().Values.Keys.ShouldBe(new[] { "Id" });
     }

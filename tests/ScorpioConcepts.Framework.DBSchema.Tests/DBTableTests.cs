@@ -14,7 +14,7 @@ public class DBTableTests
         table.DefaultRecords.ShouldBeEmpty();
         table.PrimaryKey.ShouldNotBeNull();
         table.PrimaryKey.Name.ShouldBeNull();
-        table.PrimaryKey.KeyColumns.ShouldBeEmpty();
+        table.PrimaryKey.Columns.ShouldBeEmpty();
     }
 
     [Fact]
@@ -47,14 +47,14 @@ public class DBTableTests
         var table = new DBTable("Customers");
 
         var index = table.AddIndex("IX_Name", clustered: false, unique: true);
-        index.AddIndexColumn("LastName", descending: false);
-        index.AddIndexColumn("FirstName", descending: true);
+        index.AddColumn("LastName", descending: false);
+        index.AddColumn("FirstName", descending: true);
 
         var found = table.FindIndex("IX_Name");
         found.ShouldBeSameAs(index);
         found!.Unique.ShouldBeTrue();
         found.Clustered.ShouldBeFalse();
-        found.Columns.ShouldBe(new Dictionary<string, bool> { ["LastName"] = false, ["FirstName"] = true });
+        found.Columns.Select(c => (c.Name, c.Descending)).ShouldBe(new[] { ("LastName", false), ("FirstName", true) });
     }
 
     [Fact]
@@ -67,9 +67,9 @@ public class DBTableTests
     public void AddIndexColumn_rejects_duplicate_column()
     {
         var index = new DBTable("Customers").AddIndex("IX_Name", false, false);
-        index.AddIndexColumn("Name", false);
+        index.AddColumn("Name", false);
 
-        Should.Throw<ArgumentException>(() => index.AddIndexColumn("Name", true))
+        Should.Throw<ArgumentException>(() => index.AddColumn("Name", true))
             .ParamName.ShouldBe("columnName");
     }
 
@@ -78,19 +78,19 @@ public class DBTableTests
     {
         var table = new DBTable("OrderLines");
 
-        table.PrimaryKey.AddKeyColumn("OrderId");
-        table.PrimaryKey.AddKeyColumn("LineNo");
+        table.PrimaryKey.AddColumn("OrderId");
+        table.PrimaryKey.AddColumn("LineNo");
 
-        table.PrimaryKey.KeyColumns.ShouldBe(new[] { "OrderId", "LineNo" });
+        table.PrimaryKey.Columns.ShouldBe(new[] { "OrderId", "LineNo" });
     }
 
     [Fact]
     public void PrimaryKey_AddKeyColumn_rejects_duplicate_column()
     {
         var table = new DBTable("Customers");
-        table.PrimaryKey.AddKeyColumn("Id");
+        table.PrimaryKey.AddColumn("Id");
 
-        Should.Throw<ArgumentException>(() => table.PrimaryKey.AddKeyColumn("Id"))
+        Should.Throw<ArgumentException>(() => table.PrimaryKey.AddColumn("Id"))
             .ParamName.ShouldBe("columnName");
     }
 
@@ -104,8 +104,8 @@ public class DBTableTests
         var fkey = table.FindForeignKey("FK_Orders_Customers");
         fkey.ShouldNotBeNull();
         fkey.Column.ShouldBe("CustomerId");
-        fkey.PKeyTable.ShouldBe("Customers");
-        fkey.PKeyColumn.ShouldBe("Id");
+        fkey.ReferencedTable.ShouldBe("Customers");
+        fkey.ReferencedColumn.ShouldBe("Id");
     }
 
     [Fact]
@@ -131,14 +131,14 @@ public class DBTableTests
         var table = new DBTable("Orders");
         table.AddColumn("Id", "int", "NOT NULL");
         table.PrimaryKey.Name = "PK_Orders";
-        table.PrimaryKey.AddKeyColumn("Id");
+        table.PrimaryKey.AddColumn("Id");
         var index = table.AddIndex("IX_Date", false, false);
-        index.AddIndexColumn("Date", false);
+        index.AddColumn("Date", false);
         table.AddForeignKey("FK_Orders_Customers", "CustomerId", "Customers", "Id");
 
-        table.ToString().ShouldBe("DBTable Name=Orders, Columns=1, DBTable.PrimaryKey Name=PK_Orders, KeyColumns=1");
-        table.Columns[0].ToString().ShouldBe("DBTable.Column Name='Id', DataType='int', Options='NOT NULL'");
-        index.ToString().ShouldBe("DBTable.Index Name=IX_Date, Columns=1");
-        table.ForeignKeys[0].ToString().ShouldBe("DBTable.ForeignKey Name=FK_Orders_Customers, Column=CustomerId, PKeyTable=Customers, PKeyColumn=Id");
+        table.ToString().ShouldBe("DBTable Name=Orders, Columns=1, DBPrimaryKey Name=PK_Orders, Columns=1");
+        table.Columns[0].ToString().ShouldBe("DBColumn Name='Id', DataType='int', Options='NOT NULL'");
+        index.ToString().ShouldBe("DBIndex Name=IX_Date, Columns=1");
+        table.ForeignKeys[0].ToString().ShouldBe("DBForeignKey Name=FK_Orders_Customers, Column=CustomerId, ReferencedTable=Customers, ReferencedColumn=Id");
     }
 }

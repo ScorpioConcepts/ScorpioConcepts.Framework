@@ -29,7 +29,7 @@ Every change must still compile for `netstandard2.0`.
 - `LangVersion` is `latest` everywhere, so modern syntax works on both targets. A feature that needs runtime support fails to compile for `netstandard2.0`.
 - APIs that only exist in newer .NET need `#if NET`.
 - The analyzer rules that only suggest such APIs (CA1510, CA1835, CA1865 and so on) are turned off in `Directory.Build.props`.
-- A library with `<Nullable>enable</Nullable>` has nullable-annotated public APIs. netNUTClient, LogServer and PlugIn have it now; DBSchema gets it in its own PR.
+- A library with `<Nullable>enable</Nullable>` has nullable-annotated public APIs. All four libraries have it.
 
 DBSchema uses `Microsoft.Data.SqlClient`, with a different version per target: 7.x for `net10.0` and 5.2.x for `netstandard2.0`, because 6.0 and later no longer ship a .NET Standard build. Keep the conditional `PackageReference` groups in its csproj when updating them.
 
@@ -43,8 +43,8 @@ dotnet test --project tests/ScorpioConcepts.Framework.LogServer.Tests
 dotnet test --project tests/ScorpioConcepts.Framework.LogServer.Tests --filter-method "*New_client_receives_greeting_then_history"
 ```
 
-- **DBSchema.IntegrationTests** start SQL Server in Docker through Testcontainers, using one container per run and a fresh database per test. They run serially (see `xunit.runner.json`) because `DBSchema` holds its connection statically. If Docker isn't running, they are skipped instead of failing.
-- **DBSchema.Tests** reach the JSON and XML readers and writers through `InternalsVisibleTo`, so no database is needed. They also run serially, because `DBSchema.DebugLog` is a shared static list.
+- **DBSchema.IntegrationTests** start SQL Server in Docker through Testcontainers, using one container per run and a fresh database per test, so test classes run in parallel. Each test gets a `DBSchemaManager` for its database and a `TestLogger` that keeps what it logged. If Docker isn't running, they are skipped instead of failing.
+- **DBSchema.Tests** reach the JSON and XML readers and writers, and the internal model constructors, through `InternalsVisibleTo`, so no database is needed.
 - **PlugIn.Tests** compile throwaway plugin DLLs with Roslyn (`PlugInCompiler`). Each one gets a unique assembly name unless a test passes one, such as two folders that each ship a `PlugInHelper.dll` to check that plugins get their own copy.
 - **LogServer.Tests** and **netNUTClient.Tests** use real sockets on loopback. netNUTClient talks to a scripted `FakeUpsdServer`. Every `UPSDClient` call goes through `RunWithTimeout`, so a regression in `ReplyTimeout` handling fails the test instead of hanging the run.
 - Every test is expected to run and pass. Don't merge a test that is skipped to work around a bug; fix the bug in the same change.
@@ -74,4 +74,7 @@ dotnet test --project tests/ScorpioConcepts.Framework.LogServer.Tests --filter-m
   - **Dropped connections:** a timeout, a cancellation, the server closing the connection, or an I/O error drops the connection (`Connected` becomes false), so a late reply can never be read as the next command's reply. An `ERR` reply keeps the connection.
   - **`NutProtocol`** holds the protocol rules: `Word` checks names, `Quote` escapes values, `Tokenize` splits reply lines, and `ParseServer` handles host, port and IPv6. Every argument must go through `Word` or `Quote`; that is what stops values from injecting commands.
   - **Errors:** `UPSException.ErrorCode` maps upsd `ERR` replies, and keeps the protocol's names with `-` written as `_`.
-- **DBSchema**: a static API on `DBSchema` (`InitializeDB(SqlConnection)`, `GenerateSchema`, `CheckDatabaseSchema`, `ConvertSchema`). It reads the SQL Server schema into `DBTable` objects, compares them with a schema file, and changes the database structure to match. Schema files are JSON by default (`DBSchemaJson`); the original XML format (`DBSchemaXml`) is still supported, and `CheckDatabaseSchema` detects which one a file uses from its first character. `GenerateSchemaXML` is kept for existing XML users. Default rows (`DBDefaultRecords`) can be included too. It handles structure only; it is not an ORM. Activity is recorded in `DBSchema.DebugLog`.
+- **DBSchema**: `DBSchemaManager` takes a `SqlConnection` (opened per call if it is closed, never disposed) and an optional `ILogger`. Its log messages use `[LoggerMessage]` source generation.
+  - **Model:** `DBSchemaDefinition` holds the tables (`DBTable` with `DBColumn`, `DBPrimaryKey`, `DBIndex`/`DBIndexColumn`, `DBForeignKey`, `DBDefaultRecord`). Collections are exposed through real read-only wrappers, and only the library adds to them (`internal` constructors and `Add*` methods).
+  - **Files:** `DBSchemaDefinition.Load` reads JSON (`DBSchemaJson`, the default) or the original XML (`DBSchemaXml`), detecting the format from the first character, and `Save` writes either, including each table's default records.
+  - **Checking:** `CheckDatabaseSchema` reads the database (`ReadDatabaseSchema`), compares it with the file, and adds missing tables, then columns and indexes, then foreign keys. It handles structure only; it is not an ORM.

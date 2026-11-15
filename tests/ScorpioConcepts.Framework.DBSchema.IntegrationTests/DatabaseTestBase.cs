@@ -1,9 +1,10 @@
 using Microsoft.Data.SqlClient;
+using Microsoft.Extensions.Logging;
 
 namespace ScorpioConcepts.Framework.DBSchema.IntegrationTests;
 
 /// <summary>
-/// Gives each test its own empty database, points DBSchema at it, and provides helpers
+/// Gives each test its own empty database and a DBSchemaManager for it, and provides helpers
 /// for inspecting the resulting structure.
 /// </summary>
 public abstract class DatabaseTestBase(SqlServerFixture fixture) : IAsyncLifetime
@@ -12,10 +13,16 @@ public abstract class DatabaseTestBase(SqlServerFixture fixture) : IAsyncLifetim
 
     protected SqlConnection Connection { get; private set; } = null!;
 
+    /// <summary>The manager for this test's database.</summary>
+    protected DBSchemaManager Manager { get; private set; } = null!;
+
+    /// <summary>What <see cref="Manager"/> logged.</summary>
+    protected TestLogger Log { get; } = new();
+
     public async ValueTask InitializeAsync()
     {
         Connection = await fixture.CreateDatabaseAsync();
-        DBSchema.InitializeDB(Connection);
+        Manager = new DBSchemaManager(Connection, Log);
     }
 
     public async ValueTask DisposeAsync()
@@ -28,6 +35,8 @@ public abstract class DatabaseTestBase(SqlServerFixture fixture) : IAsyncLifetim
     }
 
     protected Task<SqlConnection> CreateOtherDatabaseAsync() => fixture.CreateDatabaseAsync();
+
+    protected Task<string> CreateOtherDatabaseConnectionStringAsync() => fixture.CreateDatabaseConnectionStringAsync();
 
     protected string TempFile()
     {
@@ -123,4 +132,29 @@ public abstract class DatabaseTestBase(SqlServerFixture fixture) : IAsyncLifetim
             ORDER BY fk.name
             """, r => $"{r.GetString(0)}: {r.GetString(1)} -> {r.GetString(2)}.{r.GetString(3)}")
         .ToArray();
+}
+
+/// <summary>Keeps every message logged to it, so tests can check what the manager did.</summary>
+public sealed class TestLogger : ILogger
+{
+    private readonly List<string> _messages = new();
+
+    public IReadOnlyList<string> Messages
+    {
+        get { lock (_messages) return _messages.ToArray(); }
+    }
+
+    public void Clear()
+    {
+        lock (_messages) _messages.Clear();
+    }
+
+    public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+
+    public bool IsEnabled(LogLevel logLevel) => true;
+
+    public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+    {
+        lock (_messages) _messages.Add(formatter(state, exception));
+    }
 }

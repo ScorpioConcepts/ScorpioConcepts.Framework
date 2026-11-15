@@ -50,19 +50,19 @@ public class SchemaXmlTests : IDisposable
             ("Name", "varchar(50)", "NOT NULL DEFAULT ('')"),
         });
         customers.PrimaryKey.Name.ShouldBe("PK_Customers");
-        customers.PrimaryKey.KeyColumns.ShouldBe(new[] { "Id" });
+        customers.PrimaryKey.Columns.ShouldBe(new[] { "Id" });
         var index = customers.Indexes.ShouldHaveSingleItem();
         index.Name.ShouldBe("IX_Customers_Name");
         index.Unique.ShouldBeTrue();
         index.Clustered.ShouldBeFalse();
-        index.Columns.ShouldBe(new Dictionary<string, bool> { ["Name"] = true });
+        index.Columns.Select(c => (c.Name, c.Descending)).ShouldBe(new[] { ("Name", true) });
 
         var orders = schema.Tables["Orders"];
         var fkey = orders.ForeignKeys.ShouldHaveSingleItem();
-        (fkey.Name, fkey.Column, fkey.PKeyTable, fkey.PKeyColumn)
+        (fkey.Name, fkey.Column, fkey.ReferencedTable, fkey.ReferencedColumn)
             .ShouldBe(("FK_Orders_Customers", "CustomerId", "Customers", "Id"));
         orders.DefaultRecords.ShouldHaveSingleItem().Values
-            .ShouldBe(new Dictionary<string, object> { ["Id"] = "1", ["CustomerId"] = "1" });
+            .ShouldBe(new Dictionary<string, object?> { ["Id"] = "1", ["CustomerId"] = "1" });
     }
 
     [Theory]
@@ -132,23 +132,23 @@ public class SchemaXmlTests : IDisposable
     [Fact]
     public void Written_schema_reads_back_identically()
     {
-        var schema = new DBSchema();
+        var schema = new DBSchemaDefinition();
         var customers = schema.AddTable("Customers");
         customers.AddColumn("Id", "int identity", "NOT NULL");
         customers.AddColumn("Name", "varchar(50)", "NULL");
         customers.PrimaryKey.Name = "PK_Customers";
-        customers.PrimaryKey.AddKeyColumn("Id");
+        customers.PrimaryKey.AddColumn("Id");
         var index = customers.AddIndex("IX_Customers_Name", clustered: false, unique: true);
-        index.AddIndexColumn("Name", descending: true);
+        index.AddColumn("Name", descending: true);
 
         var orders = schema.AddTable("Orders");
         orders.AddColumn("Id", "int", "NOT NULL");
         orders.AddColumn("CustomerId", "int", "NOT NULL");
         orders.PrimaryKey.Name = "PK_Orders";
-        orders.PrimaryKey.AddKeyColumn("Id");
+        orders.PrimaryKey.AddColumn("Id");
         orders.AddForeignKey("FK_Orders_Customers", "CustomerId", "Customers", "Id");
 
-        DBSchemaXml.Write(schema, _file, new DBDefaultRecords());
+        DBSchemaXml.Write(schema, _file);
         var read = DBSchemaXml.Read(_file);
 
         read.Tables.Keys.ShouldBe(new[] { "Customers", "Orders" });
@@ -158,30 +158,30 @@ public class SchemaXmlTests : IDisposable
             actual.Columns.Select(c => (c.Name, c.DataType, c.Options))
                 .ShouldBe(expected.Columns.Select(c => (c.Name, c.DataType, c.Options)));
             actual.PrimaryKey.Name.ShouldBe(expected.PrimaryKey.Name);
-            actual.PrimaryKey.KeyColumns.ShouldBe(expected.PrimaryKey.KeyColumns);
+            actual.PrimaryKey.Columns.ShouldBe(expected.PrimaryKey.Columns);
             actual.Indexes.Select(i => (i.Name, i.Clustered, i.Unique, string.Join(",", i.Columns)))
                 .ShouldBe(expected.Indexes.Select(i => (i.Name, i.Clustered, i.Unique, string.Join(",", i.Columns))));
-            actual.ForeignKeys.Select(f => (f.Name, f.Column, f.PKeyTable, f.PKeyColumn))
-                .ShouldBe(expected.ForeignKeys.Select(f => (f.Name, f.Column, f.PKeyTable, f.PKeyColumn)));
+            actual.ForeignKeys.Select(f => (f.Name, f.Column, f.ReferencedTable, f.ReferencedColumn))
+                .ShouldBe(expected.ForeignKeys.Select(f => (f.Name, f.Column, f.ReferencedTable, f.ReferencedColumn)));
         }
     }
 
     [Fact]
     public void Table_without_primary_key_writes_no_primary_key_element()
     {
-        var schema = new DBSchema();
+        var schema = new DBSchemaDefinition();
         schema.AddTable("Log").AddColumn("Message", "varchar(100)", "NULL");
 
-        DBSchemaXml.Write(schema, _file, new DBDefaultRecords());
+        DBSchemaXml.Write(schema, _file);
 
         File.ReadAllText(_file).ShouldNotContain("primary_key");
-        DBSchemaXml.Read(_file).Tables["Log"].PrimaryKey.KeyColumns.ShouldBeEmpty();
+        DBSchemaXml.Read(_file).Tables["Log"].PrimaryKey.Columns.ShouldBeEmpty();
     }
 
     [Fact]
     public void Default_records_are_written_and_read_back_as_text()
     {
-        var schema = new DBSchema();
+        var schema = new DBSchemaDefinition();
         var settings = schema.AddTable("Settings");
         settings.AddColumn("Id", "int", "NOT NULL");
         settings.AddColumn("Value", "varchar(100)", "NULL");
@@ -192,25 +192,16 @@ public class SchemaXmlTests : IDisposable
         record.AddValue("Value", "<needs & escaping>");
         defaults.AddRecord("NotInSchema").AddValue("Id", 1);
 
-        DBSchemaXml.Write(schema, _file, defaults);
+        schema.AddDefaultRecords(defaults);
+        DBSchemaXml.Write(schema, _file);
         var read = DBSchemaXml.Read(_file);
 
         // Values are not typed in the XML, so everything comes back as a string.
         read.Tables["Settings"].DefaultRecords.ShouldHaveSingleItem().Values
-            .ShouldBe(new Dictionary<string, object> { ["Id"] = "42", ["Value"] = "<needs & escaping>" });
+            .ShouldBe(new Dictionary<string, object?> { ["Id"] = "42", ["Value"] = "<needs & escaping>" });
         read.Tables.ContainsKey("NotInSchema").ShouldBeFalse();
     }
 
-    [Fact]
-    public void WriteSchemaXML_records_progress_in_DebugLog()
-    {
-        var schema = new DBSchema();
-        schema.AddTable("Customers").AddColumn("Id", "int", "NOT NULL");
-
-        DBSchemaXml.Write(schema, _file, new DBDefaultRecords());
-
-        DBSchema.DebugLog.ShouldContain(line => line.Contains("Customers"));
-    }
 }
 
 public class DBSchemaModelTests
@@ -218,7 +209,7 @@ public class DBSchemaModelTests
     [Fact]
     public void AddTable_rejects_duplicate_table()
     {
-        var schema = new DBSchema();
+        var schema = new DBSchemaDefinition();
         schema.AddTable("Customers");
 
         Should.Throw<ArgumentException>(() => schema.AddTable("Customers"))

@@ -1,338 +1,230 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
+using System.Collections.ObjectModel;
+using System.Globalization;
 
-namespace ScorpioConcepts.Framework.DBSchema
+namespace ScorpioConcepts.Framework.DBSchema;
+
+/// <summary>
+/// The structure of one database table: its columns, primary key, indexes, foreign keys and default records.
+/// </summary>
+public sealed class DBTable
 {
-    /// <summary>
-    /// Class represents the structure of a Database Table
-    /// </summary>
-    public class DBTable
+    private readonly List<DBColumn> _columns = new();
+    private readonly List<DBIndex> _indexes = new();
+    private readonly List<DBForeignKey> _foreignKeys = new();
+    private readonly List<DBDefaultRecord> _defaultRecords = new();
+
+    internal DBTable(string name)
     {
-        /// <summary>
-        /// Represents a Database Column
-        /// </summary>
-        public class Column
-        {
-            /// <summary>
-            /// Name
-            /// </summary>
-            public string Name { get; internal set; }
-            /// <summary>
-            /// Data Type
-            /// </summary>
-            public string DataType { get; internal set; }
-            /// <summary>
-            /// Any Database options like NOT NULL or Defaults
-            /// </summary>
-            public string Options { get; internal set; }
-
-            /// <summary>
-            /// String representation of the Database Column
-            /// </summary>
-            /// <returns></returns>
-            public override string ToString()
-            {
-                return "DBTable.Column Name='" + Name + "', DataType='" + DataType + "', Options='" + Options + "'";
-            }
-        }
-        /// <summary>
-        /// Represents a Database Primary Key
-        /// </summary>
-        public class PKey
-        {
-            /// <summary>
-            /// Name
-            /// </summary>
-            public string Name { get; internal set; }
-            /// <summary>
-            /// List of Columns in the Primary Key
-            /// </summary>
-            public List<String> KeyColumns { get; internal set; }
-
-            /// <summary>
-            /// Create a new Primary Key
-            /// </summary>
-            internal PKey()
-            {
-                KeyColumns = new List<string>();
-            }
-
-            /// <summary>
-            /// Add a column to the Primary Key
-            /// </summary>
-            /// <param name="columnName"></param>
-            internal void AddKeyColumn(string columnName)
-            {
-                if (KeyColumns.Contains(columnName) == true)
-                {
-                    throw new ArgumentException("Column already in Primary Key list!!", "columnName");
-                }
-
-                KeyColumns.Add(columnName);
-            }
-
-            /// <summary>
-            /// Returns a string representation of the Primary Key
-            /// </summary>
-            /// <returns></returns>
-            public override string ToString()
-            {
-                return "DBTable.PrimaryKey Name=" + Name + ", KeyColumns=" + KeyColumns.Count.ToString();
-            }
-        }
-        /// <summary>
-        /// Represents a Database Index
-        /// </summary>
-        public class Index
-        {
-            /// <summary>
-            /// Name
-            /// </summary>
-            public string Name { get; internal set; }
-            /// <summary>
-            /// Is this a UNIQUE index
-            /// </summary>
-            public bool Unique { get; internal set; }
-            /// <summary>
-            /// Is this Index CLUSTERED
-            /// </summary>
-            public bool Clustered { get; internal set; }
-            /// <summary>
-            /// List of Columns in this Index
-            /// </summary>
-            public Dictionary<String, bool> Columns { get; internal set; }
-
-            /// <summary>
-            /// Create a new Index
-            /// </summary>
-            internal Index()
-            {
-                Columns = new Dictionary<string, bool>();
-            }
-
-            /// <summary>
-            /// Add a column to the Index
-            /// </summary>
-            /// <param name="columnName"></param>
-            /// <param name="descending"></param>
-            internal void AddIndexColumn(string columnName, bool descending)
-            {
-                if (Columns.ContainsKey(columnName) == true)
-                {
-                    throw new ArgumentException("Column already in Index column list!!", "columnName");
-                }
-
-                Columns.Add(columnName, descending);
-            }
-
-            /// <summary>
-            /// Returns a string represenation of the Index
-            /// </summary>
-            /// <returns></returns>
-            public override string ToString()
-            {
-                return "DBTable.Index Name=" + Name + ", Columns=" + Columns.Count.ToString();
-            }
-        }
-        /// <summary>
-        /// Represents a Database Foreign Key
-        /// </summary>
-        public class ForeignKey
-        {
-            /// <summary>
-            /// Name
-            /// </summary>
-            public string Name { get; internal set; }
-            /// <summary>
-            /// Column
-            /// </summary>
-            public string Column { get; internal set; }
-            /// <summary>
-            /// Primary Key Table
-            /// </summary>
-            public string PKeyTable { get; internal set; }
-            /// <summary>
-            /// Primary Key Column
-            /// </summary>
-            public string PKeyColumn { get; internal set; }
-
-            /// <summary>
-            /// Returns a string representation of the Foreign Key
-            /// </summary>
-            /// <returns></returns>
-            public override string ToString()
-            {
-                return "DBTable.ForeignKey Name=" + Name + ", Column=" + Column + ", PKeyTable=" + PKeyTable + ", PKeyColumn=" + PKeyColumn;
-            }
-        }
-
-        /// <summary>
-        /// Table Name
-        /// </summary>
-        public string Name { get; internal set; }
-        /// <summary>
-        /// List of Columns
-        /// </summary>
-        public List<Column> Columns { get; internal set; }
-        /// <summary>
-        /// Primary Key
-        /// </summary>
-        public PKey PrimaryKey { get; internal set; }
-        /// <summary>
-        /// List of Indexes
-        /// </summary>
-        public List<Index> Indexes { get; internal set; }
-        /// <summary>
-        /// List of Foreign Keys
-        /// </summary>
-        public List<ForeignKey> ForeignKeys { get; internal set; }
-        /// <summary>
-        /// List of Default Records for this table
-        /// </summary>
-        public List<DBDefaultRecord> DefaultRecords { get; internal set; }
-
-        /// <summary>
-        /// Create a new Database Table
-        /// </summary>
-        /// <param name="name"></param>
-        internal DBTable(string name)
-        {
-            this.Name = name;
-            this.Columns = new List<Column>();
-            this.PrimaryKey = new PKey();
-            this.Indexes = new List<Index>();
-            this.ForeignKeys = new List<ForeignKey>();
-            this.DefaultRecords = new List<DBDefaultRecord>();
-        }
-
-        /// <summary>
-        /// Add a column to the table
-        /// </summary>
-        /// <param name="name"></param>
-        /// <param name="dataType"></param>
-        /// <param name="options"></param>
-        internal void AddColumn(string name, string dataType, string options)
-        {
-            Column col = new Column();
-            col.Name = name;
-            col.DataType = dataType;
-            col.Options = options;
-
-            this.Columns.Add(col);
-        }
-
-        /// <summary>
-        /// Add an index to the table
-        /// </summary>
-        /// <param name="name"></param>
-        /// <param name="clustered"></param>
-        /// <param name="unique"></param>
-        /// <returns></returns>
-        internal Index AddIndex(string name, bool clustered, bool unique)
-        {
-            Index idx = new Index();
-            idx.Name = name;
-            idx.Unique = unique;
-            idx.Clustered = clustered;
-
-            this.Indexes.Add(idx);
-
-            return idx;
-        }
-
-        /// <summary>
-        /// Add a foreign key to the table
-        /// </summary>
-        /// <param name="name"></param>
-        /// <param name="column"></param>
-        /// <param name="pKeyTable"></param>
-        /// <param name="pKeyColumn"></param>
-        internal void AddForeignKey(string name, string column, string pKeyTable, string pKeyColumn)
-        {
-            ForeignKey fkey = new ForeignKey();
-            fkey.Name = name;
-            fkey.Column = column;
-            fkey.PKeyTable = pKeyTable;
-            fkey.PKeyColumn = pKeyColumn;
-
-            this.ForeignKeys.Add(fkey);
-        }
-
-        /// <summary>
-        /// Add a default record to the table
-        /// </summary>
-        /// <returns></returns>
-        internal DBDefaultRecord AddDefaultRecord()
-        {
-            DBDefaultRecord rec = new DBDefaultRecord();
-            this.DefaultRecords.Add(rec);
-
-            return rec;
-        }
-
-        /// <summary>
-        /// Find the Database Column with the given name
-        /// </summary>
-        /// <param name="columnName">Name of the column to find</param>
-        /// <returns>The column if found, null otherwise</returns>
-        public Column FindColumn(string columnName)
-        {
-            foreach (Column column in Columns)
-            {
-                if (column.Name == columnName)
-                {
-                    return column;
-                }
-            }
-
-            return null;
-        }
-
-        /// <summary>
-        /// Find the Database Index with the given name
-        /// </summary>
-        /// <param name="indexName">Name of the index to find</param>
-        /// <returns>The index if found, null otherwise</returns>
-        public Index FindIndex(string indexName)
-        {
-            foreach (Index idx in Indexes)
-            {
-                if (idx.Name == indexName)
-                {
-                    return idx;
-                }
-            }
-
-            return null;
-        }
-
-        /// <summary>
-        /// Find the Database Foreign Key with the given name
-        /// </summary>
-        /// <param name="fkeyName">Name of the foreign key to find</param>
-        /// <returns>The foreign key if found, null otherwise</returns>
-        public ForeignKey FindForeignKey(string fkeyName)
-        {
-            foreach (ForeignKey fkey in ForeignKeys)
-            {
-                if (fkey.Name == fkeyName)
-                {
-                    return fkey;
-                }
-            }
-
-            return null;
-        }
-
-        /// <summary>
-        /// Returns a string representation of the Database Table
-        /// </summary>
-        /// <returns></returns>
-        public override string ToString()
-        {
-            return "DBTable Name=" + Name + ", Columns=" + Columns.Count.ToString() + ", " + PrimaryKey.ToString();
-        }
+        Name = name;
+        Columns = _columns.AsReadOnly();
+        Indexes = _indexes.AsReadOnly();
+        ForeignKeys = _foreignKeys.AsReadOnly();
+        DefaultRecords = _defaultRecords.AsReadOnly();
     }
+
+    /// <summary>The table name.</summary>
+    public string Name { get; }
+
+    /// <summary>The columns, in table order.</summary>
+    public IReadOnlyList<DBColumn> Columns { get; }
+
+    /// <summary>The primary key. Its <see cref="DBPrimaryKey.Name"/> is null when the table has none.</summary>
+    public DBPrimaryKey PrimaryKey { get; } = new();
+
+    /// <summary>The indexes, not counting the primary key.</summary>
+    public IReadOnlyList<DBIndex> Indexes { get; }
+
+    /// <summary>The foreign keys.</summary>
+    public IReadOnlyList<DBForeignKey> ForeignKeys { get; }
+
+    /// <summary>The rows inserted when the table is created.</summary>
+    public IReadOnlyList<DBDefaultRecord> DefaultRecords { get; }
+
+    internal DBColumn AddColumn(string name, string dataType, string options)
+    {
+        var column = new DBColumn(name, dataType, options);
+        _columns.Add(column);
+        return column;
+    }
+
+    internal DBIndex AddIndex(string name, bool clustered, bool unique)
+    {
+        var index = new DBIndex(name, clustered, unique);
+        _indexes.Add(index);
+        return index;
+    }
+
+    internal DBForeignKey AddForeignKey(string name, string column, string referencedTable, string referencedColumn)
+    {
+        var foreignKey = new DBForeignKey(name, column, referencedTable, referencedColumn);
+        _foreignKeys.Add(foreignKey);
+        return foreignKey;
+    }
+
+    internal DBDefaultRecord AddDefaultRecord()
+    {
+        var record = new DBDefaultRecord();
+        _defaultRecords.Add(record);
+        return record;
+    }
+
+    internal void AddDefaultRecord(DBDefaultRecord record) => _defaultRecords.Add(record);
+
+    /// <summary>Finds the column with the given name.</summary>
+    /// <returns>The column, or null if the table has no such column.</returns>
+    public DBColumn? FindColumn(string columnName) => _columns.Find(c => string.Equals(c.Name, columnName, StringComparison.Ordinal));
+
+    /// <summary>Finds the index with the given name.</summary>
+    /// <returns>The index, or null if the table has no such index.</returns>
+    public DBIndex? FindIndex(string indexName) => _indexes.Find(i => string.Equals(i.Name, indexName, StringComparison.Ordinal));
+
+    /// <summary>Finds the foreign key with the given name.</summary>
+    /// <returns>The foreign key, or null if the table has no such foreign key.</returns>
+    public DBForeignKey? FindForeignKey(string foreignKeyName) =>
+        _foreignKeys.Find(k => string.Equals(k.Name, foreignKeyName, StringComparison.Ordinal));
+
+    /// <inheritdoc/>
+    public override string ToString() =>
+        "DBTable Name=" + Name + ", Columns=" + _columns.Count.ToString(CultureInfo.InvariantCulture) + ", " + PrimaryKey;
+}
+
+/// <summary>A table column.</summary>
+public sealed class DBColumn
+{
+    internal DBColumn(string name, string dataType, string options)
+    {
+        Name = name;
+        DataType = dataType;
+        Options = options;
+    }
+
+    /// <summary>The column name.</summary>
+    public string Name { get; }
+
+    /// <summary>The data type as written in <c>CREATE TABLE</c>, such as <c>nvarchar(50)</c> or <c>int identity</c>.</summary>
+    public string DataType { get; }
+
+    /// <summary>The rest of the column definition, such as <c>NOT NULL DEFAULT ('')</c>. Empty if there is none.</summary>
+    public string Options { get; }
+
+    /// <inheritdoc/>
+    public override string ToString() => "DBColumn Name='" + Name + "', DataType='" + DataType + "', Options='" + Options + "'";
+}
+
+/// <summary>A table's primary key.</summary>
+public sealed class DBPrimaryKey
+{
+    private readonly List<string> _columns = new();
+
+    internal DBPrimaryKey()
+    {
+        Columns = _columns.AsReadOnly();
+    }
+
+    /// <summary>The constraint name, or null when the table has no primary key.</summary>
+    public string? Name { get; internal set; }
+
+    /// <summary>The key columns, in key order.</summary>
+    public IReadOnlyList<string> Columns { get; }
+
+    internal void AddColumn(string columnName)
+    {
+        if (_columns.Contains(columnName))
+        {
+            throw new ArgumentException("Column '" + columnName + "' is already in the primary key", nameof(columnName));
+        }
+
+        _columns.Add(columnName);
+    }
+
+    /// <inheritdoc/>
+    public override string ToString() => "DBPrimaryKey Name=" + Name + ", Columns=" + _columns.Count.ToString(CultureInfo.InvariantCulture);
+}
+
+/// <summary>A table index, other than the primary key.</summary>
+public sealed class DBIndex
+{
+    private readonly List<DBIndexColumn> _columns = new();
+
+    internal DBIndex(string name, bool clustered, bool unique)
+    {
+        Name = name;
+        Clustered = clustered;
+        Unique = unique;
+        Columns = _columns.AsReadOnly();
+    }
+
+    /// <summary>The index name.</summary>
+    public string Name { get; }
+
+    /// <summary>Whether this is a <c>UNIQUE</c> index.</summary>
+    public bool Unique { get; }
+
+    /// <summary>Whether this is a <c>CLUSTERED</c> index.</summary>
+    public bool Clustered { get; }
+
+    /// <summary>The key columns, in key order.</summary>
+    public IReadOnlyList<DBIndexColumn> Columns { get; }
+
+    internal void AddColumn(string columnName, bool descending)
+    {
+        if (_columns.Exists(c => string.Equals(c.Name, columnName, StringComparison.Ordinal)))
+        {
+            throw new ArgumentException("Column '" + columnName + "' is already in index '" + Name + "'", nameof(columnName));
+        }
+
+        _columns.Add(new DBIndexColumn(columnName, descending));
+    }
+
+    /// <inheritdoc/>
+    public override string ToString() => "DBIndex Name=" + Name + ", Columns=" + _columns.Count.ToString(CultureInfo.InvariantCulture);
+}
+
+/// <summary>One key column of an index.</summary>
+public sealed class DBIndexColumn
+{
+    internal DBIndexColumn(string name, bool descending)
+    {
+        Name = name;
+        Descending = descending;
+    }
+
+    /// <summary>The column name.</summary>
+    public string Name { get; }
+
+    /// <summary>Whether the column is sorted in descending order.</summary>
+    public bool Descending { get; }
+
+    /// <inheritdoc/>
+    public override string ToString() => Descending ? Name + " DESC" : Name;
+}
+
+/// <summary>A foreign key from one column of a table to a column of another table.</summary>
+public sealed class DBForeignKey
+{
+    internal DBForeignKey(string name, string column, string referencedTable, string referencedColumn)
+    {
+        Name = name;
+        Column = column;
+        ReferencedTable = referencedTable;
+        ReferencedColumn = referencedColumn;
+    }
+
+    /// <summary>The constraint name.</summary>
+    public string Name { get; }
+
+    /// <summary>The column in this table.</summary>
+    public string Column { get; }
+
+    /// <summary>The table the key refers to.</summary>
+    public string ReferencedTable { get; }
+
+    /// <summary>The column in <see cref="ReferencedTable"/> the key refers to.</summary>
+    public string ReferencedColumn { get; }
+
+    /// <inheritdoc/>
+    public override string ToString() =>
+        "DBForeignKey Name=" + Name + ", Column=" + Column + ", ReferencedTable=" + ReferencedTable + ", ReferencedColumn=" + ReferencedColumn;
 }
