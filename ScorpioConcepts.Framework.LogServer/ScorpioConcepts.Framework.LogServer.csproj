@@ -3,6 +3,8 @@
   <PropertyGroup>
     <PackageId>ScorpioConcepts.Framework.LogServer</PackageId>
     <Version>3.0.0</Version>
+    <!-- The last version on NuGet.org. Pack fails if the public API breaks compared with it; update it after each release -->
+    <PackageValidationBaselineVersion>3.0.0</PackageValidationBaselineVersion>
     <Title>Scorpio Concepts Logging Server</Title>
     <Description>A simple TCP log server: connect with any telnet client to watch an application's log live. Meant for debugging; it has no authentication.</Description>
     <PackageReleaseNotes>Targets .NET 10 and .NET Standard 2.0; .NET Framework targets have been dropped. Breaking changes: the default port is now 7446 instead of 446, so it runs without root on Linux; the events are now ClientConnected, ClientDisconnected and ServerError, using EventHandler&lt;T&gt;; LogHistory returns IReadOnlyList&lt;string&gt;; LogServer is sealed; Start() can only be called once. New: a constructor that takes the IPAddress to listen on, MaxClients and MaxQueuedLines limits, LocalEndpoint, ConnectedClients, IDisposable, UTF-8 output, and async I/O instead of a thread per client.</PackageReleaseNotes>
