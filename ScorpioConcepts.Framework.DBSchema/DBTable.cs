@@ -5,28 +5,6 @@ using System.Text;
 
 namespace ScorpioConcepts.Framework.DBSchema
 {
-    internal class DBTableComparer : IEqualityComparer<DBTable>
-    {
-        #region IEqualityComparer<DBTable> Members
-
-        public bool Equals(DBTable x, DBTable y)
-        {
-            if (x.Name == y.Name)
-            {
-                return true;
-            }
-
-            return false;
-        }
-
-        public int GetHashCode(DBTable obj)
-        {
-            return obj.GetHashCode();
-        }
-
-        #endregion
-    }
-
     /// <summary>
     /// Class represents the structure of a Database Table
     /// </summary>

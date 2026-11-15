@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Net.Sockets;
 using System.Threading;
@@ -42,13 +43,17 @@ namespace ScorpioConcepts.Framework.LogServer
 
         private TcpListener tcp_server;
         private Thread server_thread;
-        private Mutex logMutex;
         private volatile bool running = false;
+
+        // Only the server thread uses this list
         private List<LogServer_Client> clients;
-        private List<LogServer_Client> discon_clients;
+        // Client threads report that they ended through this queue, and the server thread removes them
+        private ConcurrentQueue<LogServer_Client> discon_clients;
 
         private string greeting;
 
+        // Guards logLines and unsentLines, which Log() changes from the caller's thread
+        private readonly object logLock = new object();
         private Queue<string> logLines;
         private Queue<string> unsentLines;
 
@@ -74,14 +79,12 @@ namespace ScorpioConcepts.Framework.LogServer
             this.tcp_server = new TcpListener(IPAddress.Any, port);
             this.server_thread = new Thread(this._exec);
             this.clients = new List<LogServer_Client>();
-            this.discon_clients = new List<LogServer_Client>();
+            this.discon_clients = new ConcurrentQueue<LogServer_Client>();
 
             this.greeting = greetingMessage;
-
             this.logLines = new Queue<string>();
             this.unsentLines = new Queue<string>();
             this.maxLogSize = logSize;
-            this.logMutex = new Mutex();
         }
 
         /// <summary>
@@ -89,6 +92,8 @@ namespace ScorpioConcepts.Framework.LogServer
         /// </summary>
         public void Start()
         {
+            // Set this before the thread starts, so a Stop() straight after Start() is not undone by the new thread
+            this.running = true;
             this.server_thread.Start();
         }
 
@@ -122,21 +127,14 @@ namespace ScorpioConcepts.Framework.LogServer
         /// <param name="line">Any text to be sent to the Log Client</param>
         public void Log(string line)
         {
-            if (logMutex.WaitOne() == true)
+            lock (logLock)
             {
-                try
+                this.logLines.Enqueue(line);
+                if (this.logLines.Count > maxLogSize)
                 {
-                    this.logLines.Enqueue(line);
-                    if (this.logLines.Count > maxLogSize)
-                    {
-                        this.logLines.Dequeue();
-                    }
-                    this.unsentLines.Enqueue(line);
+                    this.logLines.Dequeue();
                 }
-                finally
-                {
-                    logMutex.ReleaseMutex();
-                }
+                this.unsentLines.Enqueue(line);
             }
         }
 
@@ -147,25 +145,15 @@ namespace ScorpioConcepts.Framework.LogServer
         {
             get
             {
-                if (logMutex.WaitOne() == true)
+                lock (logLock)
                 {
-                    try
-                    {
-                        return this.logLines.ToArray();
-                    }
-                    finally
-                    {
-                        logMutex.ReleaseMutex();
-                    }
+                    return this.logLines.ToArray();
                 }
-
-                return new string[0];
             }
         }
 
         private void _exec()
         {
-            this.running = true;
             try
             {
                 this.tcp_server.Start();
@@ -178,22 +166,21 @@ namespace ScorpioConcepts.Framework.LogServer
 
                         LogServer_Client cl = new LogServer_Client(client);
                         cl.onThreadEnd += new LogServer_Client.ThreadEnd(cl_onThreadEnd);
-                        this.clients.Add(cl);
-                        cl.Send(greeting);
-                        if (logMutex.WaitOne() == true)
+
+                        lock (logLock)
                         {
-                            try
+                            // Deliver pending lines to the existing clients first. Otherwise a line logged just
+                            // before this client connected would reach it twice: in the history and again as new.
+                            sendUnsentLines();
+
+                            cl.Send(greeting);
+                            foreach (string line in this.logLines)
                             {
-                                foreach (string line in this.logLines)
-                                {
-                                    cl.Send(line);
-                                }
+                                cl.Send(line);
                             }
-                            finally
-                            {
-                                logMutex.ReleaseMutex();
-                            }
+                            this.clients.Add(cl);
                         }
+
                         cl.Start();
                         if (this.onClientConnect != null)
                         {
@@ -201,39 +188,19 @@ namespace ScorpioConcepts.Framework.LogServer
                         }
                     }
 
-                    if((unsentLines.Count > 0) &&  (logMutex.WaitOne() == true))
+                    lock (logLock)
                     {
-                        try
-                        {
-                            foreach(string line in unsentLines)
-                            {
-                                sendLine(line);
-                            }
-
-                            unsentLines.Clear();
-                        }
-                        finally
-                        {
-                            logMutex.ReleaseMutex();
-                        }
+                        sendUnsentLines();
                     }
 
-                    foreach (LogServer_Client cl in discon_clients)
+                    LogServer_Client disconnected;
+                    while (discon_clients.TryDequeue(out disconnected))
                     {
-                        clients.Remove(cl);
+                        clients.Remove(disconnected);
                     }
-                    discon_clients.Clear();
 
                     Thread.Sleep(10);
                 }
-
-                foreach (LogServer_Client cl in this.clients)
-                {
-                    cl.Stop();
-                    cl.Join();
-                }
-
-                this.tcp_server.Stop();
             }
             catch (Exception ex)
             {
@@ -242,21 +209,39 @@ namespace ScorpioConcepts.Framework.LogServer
                     this.onServerException(ex);
                 }
             }
+            finally
+            {
+                foreach (LogServer_Client cl in this.clients)
+                {
+                    cl.Stop();
+                    cl.Join();
+                }
 
-            this.running = false;
+                this.tcp_server.Stop();
+                this.running = false;
+            }
         }
 
-        private void sendLine(string line)
+        /// <summary>
+        /// Queue every unsent line on every client. Must be called while holding logLock.
+        /// </summary>
+        private void sendUnsentLines()
         {
-            foreach (LogServer_Client cl in this.clients)
+            foreach (string line in this.unsentLines)
             {
-                cl.Send(line);
+                foreach (LogServer_Client cl in this.clients)
+                {
+                    cl.Send(line);
+                }
             }
+
+            this.unsentLines.Clear();
         }
 
         private void cl_onThreadEnd(LogServer_Client sender)
         {
-            discon_clients.Add(sender);
+            // Runs on the client's thread, so hand the client over to the server thread for removal
+            discon_clients.Enqueue(sender);
             if (this.onClientDisconnect != null)
             {
                 this.onClientDisconnect(sender.Address);

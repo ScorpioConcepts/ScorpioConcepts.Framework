@@ -56,6 +56,14 @@ namespace ScorpioConcepts.Framework.DBSchema
 
             DBSchema dbSchema = populateDBSchema();
 
+            WriteSchemaXML(dbSchema, targetFile, defaultRecords);
+        }
+
+        /// <summary>
+        /// Write the given Database Schema, along with the given default records, to an XML file
+        /// </summary>
+        internal static void WriteSchemaXML(DBSchema dbSchema, string targetFile, DBDefaultRecords defaultRecords)
+        {
             XmlWriterSettings settings = new XmlWriterSettings();
             settings.Indent = true;
             settings.NewLineChars = Environment.NewLine;
@@ -63,98 +71,99 @@ namespace ScorpioConcepts.Framework.DBSchema
             settings.NewLineOnAttributes = false;
 
             DebugLog.Add("Creating DBSchema XML file '" + targetFile + "'...");
-            XmlWriter writer = XmlWriter.Create(targetFile, settings);
-            DebugLog.Add("Found " + dbSchema.Tables.Count.ToString() + " Tables...");
-
-            writer.WriteStartElement("tables");
-            foreach (DBTable table in dbSchema.Tables.Values)
+            // Dispose the writer even when writing fails, so the file is not left locked
+            using (XmlWriter writer = XmlWriter.Create(targetFile, settings))
             {
-                string tableName = table.Name;
+                DebugLog.Add("Found " + dbSchema.Tables.Count.ToString() + " Tables...");
 
-                DebugLog.Add("DBSchema XML for table '" + tableName + "'...");
-                writer.WriteStartElement("table");
-                writer.WriteAttributeString("name", tableName);
-
-                foreach( DBTable.Column column in table.Columns)
+                writer.WriteStartElement("tables");
+                foreach (DBTable table in dbSchema.Tables.Values)
                 {
-                    writer.WriteStartElement("column");
-                    writer.WriteAttributeString("name", column.Name);
-                    writer.WriteAttributeString("datatype", column.DataType);
-                    writer.WriteAttributeString("options", column.Options);
-                    writer.WriteEndElement();
-                }
+                    string tableName = table.Name;
 
-                if( table.PrimaryKey.KeyColumns.Count > 0 )
-                {
-                    writer.WriteStartElement("primary_key");
-                    writer.WriteAttributeString("name", table.PrimaryKey.Name);
-                    foreach (string keyColumn in table.PrimaryKey.KeyColumns)
+                    DebugLog.Add("DBSchema XML for table '" + tableName + "'...");
+                    writer.WriteStartElement("table");
+                    writer.WriteAttributeString("name", tableName);
+
+                    foreach( DBTable.Column column in table.Columns)
                     {
                         writer.WriteStartElement("column");
-                        writer.WriteAttributeString("name", keyColumn);
+                        writer.WriteAttributeString("name", column.Name);
+                        writer.WriteAttributeString("datatype", column.DataType);
+                        writer.WriteAttributeString("options", column.Options);
                         writer.WriteEndElement();
                     }
-                    writer.WriteEndElement();
-                }
 
-                foreach (DBTable.Index idx in table.Indexes)
-                {
-                    writer.WriteStartElement("index");
-                    writer.WriteAttributeString("name", idx.Name);
-                    writer.WriteAttributeString("clustered", idx.Clustered.ToString());
-                    writer.WriteAttributeString("unique", idx.Unique.ToString());
-                    foreach (KeyValuePair<string,bool> column in idx.Columns)
+                    if( table.PrimaryKey.KeyColumns.Count > 0 )
                     {
-                        writer.WriteStartElement("column");
-                        writer.WriteAttributeString("name", column.Key);
-                        writer.WriteAttributeString("desc", column.Value.ToString());
-                        writer.WriteEndElement();
-                    }
-                    writer.WriteEndElement();
-                }
-
-                foreach( DBTable.ForeignKey fkey in table.ForeignKeys)
-                {
-                    writer.WriteStartElement("foreign_key");
-                    writer.WriteAttributeString("name", fkey.Name);
-                    writer.WriteAttributeString("column", fkey.Column);
-                    writer.WriteAttributeString("pk_table", fkey.PKeyTable);
-                    writer.WriteAttributeString("pk_column", fkey.PKeyColumn);
-                    writer.WriteEndElement();
-                }
-
-                if (defaultRecords.ContainsKey(tableName))
-                {
-                    DebugLog.Add("Saving Default Records for table '" + tableName + "'...");
-                    List<DBDefaultRecord> tableDefaultRecords = defaultRecords[tableName];
-                    foreach (DBDefaultRecord record in tableDefaultRecords)
-                    {
-                        writer.WriteStartElement("default_record");
-                        foreach (KeyValuePair<string, object> kvp in record.Values)
+                        writer.WriteStartElement("primary_key");
+                        writer.WriteAttributeString("name", table.PrimaryKey.Name);
+                        foreach (string keyColumn in table.PrimaryKey.KeyColumns)
                         {
-                            writer.WriteStartElement("columnValue");
-                            writer.WriteAttributeString("column", kvp.Key);
-                            if (kvp.Value.GetType() == typeof(string))
-                            {
-                                writer.WriteCData(kvp.Value.ToString());
-                            }
-                            else
-                            {
-                                writer.WriteValue(kvp.Value);
-                            }
+                            writer.WriteStartElement("column");
+                            writer.WriteAttributeString("name", keyColumn);
                             writer.WriteEndElement();
                         }
                         writer.WriteEndElement();
                     }
+
+                    foreach (DBTable.Index idx in table.Indexes)
+                    {
+                        writer.WriteStartElement("index");
+                        writer.WriteAttributeString("name", idx.Name);
+                        writer.WriteAttributeString("clustered", idx.Clustered.ToString());
+                        writer.WriteAttributeString("unique", idx.Unique.ToString());
+                        foreach (KeyValuePair<string,bool> column in idx.Columns)
+                        {
+                            writer.WriteStartElement("column");
+                            writer.WriteAttributeString("name", column.Key);
+                            writer.WriteAttributeString("desc", column.Value.ToString());
+                            writer.WriteEndElement();
+                        }
+                        writer.WriteEndElement();
+                    }
+
+                    foreach( DBTable.ForeignKey fkey in table.ForeignKeys)
+                    {
+                        writer.WriteStartElement("foreign_key");
+                        writer.WriteAttributeString("name", fkey.Name);
+                        writer.WriteAttributeString("column", fkey.Column);
+                        writer.WriteAttributeString("pk_table", fkey.PKeyTable);
+                        writer.WriteAttributeString("pk_column", fkey.PKeyColumn);
+                        writer.WriteEndElement();
+                    }
+
+                    if (defaultRecords.ContainsKey(tableName))
+                    {
+                        DebugLog.Add("Saving Default Records for table '" + tableName + "'...");
+                        List<DBDefaultRecord> tableDefaultRecords = defaultRecords[tableName];
+                        foreach (DBDefaultRecord record in tableDefaultRecords)
+                        {
+                            writer.WriteStartElement("default_record");
+                            foreach (KeyValuePair<string, object> kvp in record.Values)
+                            {
+                                writer.WriteStartElement("columnValue");
+                                writer.WriteAttributeString("column", kvp.Key);
+                                if (kvp.Value.GetType() == typeof(string))
+                                {
+                                    writer.WriteCData(kvp.Value.ToString());
+                                }
+                                else
+                                {
+                                    writer.WriteValue(kvp.Value);
+                                }
+                                writer.WriteEndElement();
+                            }
+                            writer.WriteEndElement();
+                        }
+                    }
+
+                    writer.WriteEndElement();
+                    DebugLog.Add("DB Schema XML generated for table '" + tableName + "'");
                 }
 
                 writer.WriteEndElement();
-                DebugLog.Add("DB Schema XML generated for table '" + tableName + "'");
             }
-
-            writer.WriteEndElement();
-
-            writer.Close();
         }
 
         /// <summary>
@@ -239,20 +248,21 @@ namespace ScorpioConcepts.Framework.DBSchema
             List<String> tables = new List<string>();
 
             DebugLog.Add("Reading Database Tables...");
-            SqlCommand tablesSQL = new SqlCommand("exec sp_tables", DatabaseConnection);
-            SqlDataReader tablesReader = tablesSQL.ExecuteReader();
-            while (tablesReader.Read())
+            using (SqlCommand tablesSQL = new SqlCommand("exec sp_tables", DatabaseConnection))
+            using (SqlDataReader tablesReader = tablesSQL.ExecuteReader())
             {
-                string tableName = tablesReader["TABLE_NAME"].ToString();
-                string tableOwner = tablesReader["TABLE_OWNER"].ToString();
-                string tableType = tablesReader["TABLE_TYPE"].ToString();
-                if ((tableOwner == "dbo") && (tableType == "TABLE")
-                    && (tableName != "dtproperties"))
+                while (tablesReader.Read())
                 {
-                    tables.Add(tableName);
+                    string tableName = tablesReader["TABLE_NAME"].ToString();
+                    string tableOwner = tablesReader["TABLE_OWNER"].ToString();
+                    string tableType = tablesReader["TABLE_TYPE"].ToString();
+                    if ((tableOwner == "dbo") && (tableType == "TABLE")
+                        && (tableName != "dtproperties"))
+                    {
+                        tables.Add(tableName);
+                    }
                 }
             }
-            tablesReader.Close();
             DebugLog.Add("Found " + tables.Count.ToString() + " Tables...");
 
             foreach (string tableName in tables)
@@ -261,56 +271,57 @@ namespace ScorpioConcepts.Framework.DBSchema
                 DBTable table = dbSchema.AddTable(tableName);
 
                 DebugLog.Add("Getting Columns for table '" + tableName + "'...");
-                SqlCommand columnsSQL = new SqlCommand("exec sp_columns [" + tableName + "]", DatabaseConnection);
-                SqlDataReader columnsReader = columnsSQL.ExecuteReader();
-                while (columnsReader.Read())
+                string selectColumnsSQL = "SELECT c.name, t.name AS type_name, c.max_length, c.precision, c.scale,";
+                selectColumnsSQL += " c.is_nullable, c.is_identity, dc.definition AS default_definition";
+                selectColumnsSQL += " FROM sys.columns c";
+                selectColumnsSQL += " JOIN sys.types t ON (t.user_type_id = c.user_type_id)";
+                selectColumnsSQL += " LEFT JOIN sys.default_constraints dc ON (dc.object_id = c.default_object_id)";
+                selectColumnsSQL += " WHERE c.object_id = OBJECT_ID(@table)";
+                selectColumnsSQL += " ORDER BY c.column_id";
+
+                using (SqlCommand columnsSQL = new SqlCommand(selectColumnsSQL, DatabaseConnection))
                 {
-                    string columnName = columnsReader["COLUMN_NAME"].ToString();
-                    string columnType = columnsReader["TYPE_NAME"].ToString();
-                    int columnSize = Int32.Parse(columnsReader["LENGTH"].ToString());
-                    string columnDefault = columnsReader["COLUMN_DEF"].ToString();
-                    int columnNullable = Int32.Parse(columnsReader["NULLABLE"].ToString());
-                    string columnOptions = String.Empty;
+                    columnsSQL.Parameters.AddWithValue("@table", "[dbo].[" + tableName + "]");
+                    using (SqlDataReader columnsReader = columnsSQL.ExecuteReader())
+                    {
+                        while (columnsReader.Read())
+                        {
+                            string columnName = columnsReader.GetString(0);
+                            string columnType = FormatDataType(
+                                columnsReader.GetString(1),
+                                columnsReader.GetInt16(2),
+                                columnsReader.GetByte(3),
+                                columnsReader.GetByte(4),
+                                columnsReader.GetBoolean(6));
+                            string columnOptions = columnsReader.GetBoolean(5) ? "NULL" : "NOT NULL";
+                            if (columnsReader.IsDBNull(7) == false)
+                            {
+                                columnOptions += " DEFAULT " + columnsReader.GetString(7);
+                            }
 
-                    if (columnNullable == 0)
-                    {
-                        columnOptions = "NOT NULL";
+                            table.AddColumn(columnName, columnType, columnOptions);
+                        }
                     }
-                    else
-                    {
-                        columnOptions = "NULL";
-                    }
-                    if (columnDefault != String.Empty)
-                    {
-                        columnOptions += " DEFAULT " + columnDefault;
-                    }
-
-                    if (columnType.ToLower() == "varchar")
-                    {
-                        columnType += "(" + columnSize.ToString() + ")";
-                    }
-
-                    table.AddColumn(columnName, columnType, columnOptions);
                 }
-                columnsReader.Close();
 
                 DebugLog.Add("Getting Primary Keys for table '" + tableName + "'...");
                 Dictionary<string, List<string>> pkeys = new Dictionary<string, List<string>>();
 
-                SqlCommand pkeySQL = new SqlCommand("exec sp_pkeys [" + tableName + "]", DatabaseConnection);
-                SqlDataReader pkeysReader = pkeySQL.ExecuteReader();
-                while (pkeysReader.Read())
+                using (SqlCommand pkeySQL = new SqlCommand("exec sp_pkeys [" + tableName + "]", DatabaseConnection))
+                using (SqlDataReader pkeysReader = pkeySQL.ExecuteReader())
                 {
-                    string keyName = pkeysReader["PK_NAME"].ToString();
-                    string keyColumnName = pkeysReader["COLUMN_NAME"].ToString();
-                    if (pkeys.ContainsKey(keyName) == false)
+                    while (pkeysReader.Read())
                     {
-                        pkeys.Add(keyName, new List<string>());
-                    }
+                        string keyName = pkeysReader["PK_NAME"].ToString();
+                        string keyColumnName = pkeysReader["COLUMN_NAME"].ToString();
+                        if (pkeys.ContainsKey(keyName) == false)
+                        {
+                            pkeys.Add(keyName, new List<string>());
+                        }
 
-                    pkeys[keyName].Add(keyColumnName);
+                        pkeys[keyName].Add(keyColumnName);
+                    }
                 }
-                pkeysReader.Close();
 
                 foreach (string keyName in pkeys.Keys)
                 {
@@ -333,43 +344,50 @@ namespace ScorpioConcepts.Framework.DBSchema
                     selectIndexesSQL += " AND ixc.object_id = idx.object_id";
                     selectIndexesSQL += " AND cols.object_id = idx.object_id";
                     selectIndexesSQL += " AND idx.is_primary_key = 0";
+                    // Included columns are not key columns, and key columns must keep their order
+                    selectIndexesSQL += " AND ixc.is_included_column = 0";
+                    selectIndexesSQL += " ORDER BY idx.name, ixc.key_ordinal";
 
                     DebugLog.Add("Getting Indexes for table '" + tableName + "'...");
-                    SqlCommand indexesSQL = new SqlCommand(selectIndexesSQL, DatabaseConnection);
-                    indexesSQL.Parameters.AddWithValue("@table", tableName);
-                    SqlDataReader indexesReader = indexesSQL.ExecuteReader();
-                    while (indexesReader.Read())
+                    using (SqlCommand indexesSQL = new SqlCommand(selectIndexesSQL, DatabaseConnection))
                     {
-                        string idxName = indexesReader["idx_name"].ToString();
-                        string idxType = indexesReader["type_desc"].ToString();
-                        bool idxUnique = Boolean.Parse(indexesReader["is_unique"].ToString());
-                        string idxColName = indexesReader["col_name"].ToString();
-                        bool idxColDesc = Boolean.Parse(indexesReader["is_descending_key"].ToString());
-
-                        DBTable.Index idx = table.FindIndex(idxName);
-                        if (idx == null)
+                        indexesSQL.Parameters.AddWithValue("@table", "[dbo].[" + tableName + "]");
+                        using (SqlDataReader indexesReader = indexesSQL.ExecuteReader())
                         {
-                            idx = table.AddIndex(idxName, (idxType == "CLUSTERED"), idxUnique);
-                        }
+                            while (indexesReader.Read())
+                            {
+                                string idxName = indexesReader["idx_name"].ToString();
+                                string idxType = indexesReader["type_desc"].ToString();
+                                bool idxUnique = Boolean.Parse(indexesReader["is_unique"].ToString());
+                                string idxColName = indexesReader["col_name"].ToString();
+                                bool idxColDesc = Boolean.Parse(indexesReader["is_descending_key"].ToString());
 
-                        idx.AddIndexColumn(idxColName, idxColDesc);
+                                DBTable.Index idx = table.FindIndex(idxName);
+                                if (idx == null)
+                                {
+                                    idx = table.AddIndex(idxName, (idxType == "CLUSTERED"), idxUnique);
+                                }
+
+                                idx.AddIndexColumn(idxColName, idxColDesc);
+                            }
+                        }
                     }
-                    indexesReader.Close();
                 }
 
                 DebugLog.Add("Getting Foreign Keys for table '" + tableName + "'...");
-                SqlCommand fkeySQL = new SqlCommand("exec sp_fkeys @fktable_name=[" + tableName + "]", DatabaseConnection);
-                SqlDataReader fkeysReader = fkeySQL.ExecuteReader();
-                while (fkeysReader.Read())
+                using (SqlCommand fkeySQL = new SqlCommand("exec sp_fkeys @fktable_name=[" + tableName + "]", DatabaseConnection))
+                using (SqlDataReader fkeysReader = fkeySQL.ExecuteReader())
                 {
-                    string keyName = fkeysReader["FK_NAME"].ToString();
-                    string keyColumnName = fkeysReader["FKCOLUMN_NAME"].ToString();
-                    string pkeyTableName = fkeysReader["PKTABLE_NAME"].ToString();
-                    string pkeyColumnName = fkeysReader["PKCOLUMN_NAME"].ToString();
+                    while (fkeysReader.Read())
+                    {
+                        string keyName = fkeysReader["FK_NAME"].ToString();
+                        string keyColumnName = fkeysReader["FKCOLUMN_NAME"].ToString();
+                        string pkeyTableName = fkeysReader["PKTABLE_NAME"].ToString();
+                        string pkeyColumnName = fkeysReader["PKCOLUMN_NAME"].ToString();
 
-                    table.AddForeignKey(keyName, keyColumnName, pkeyTableName, pkeyColumnName);
+                        table.AddForeignKey(keyName, keyColumnName, pkeyTableName, pkeyColumnName);
+                    }
                 }
-                fkeysReader.Close();
 
                 DebugLog.Add("DB Schema generated for table '" + tableName + "'");
             }
@@ -377,45 +395,121 @@ namespace ScorpioConcepts.Framework.DBSchema
             return dbSchema;
         }
 
-        private static DBSchema populateXMLSchema(string schemaXMLFile)
+        /// <summary>
+        /// Build a column data type, including its size, the way it would be written in a CREATE TABLE statement
+        /// </summary>
+        /// <param name="typeName">Type name from sys.types</param>
+        /// <param name="maxLength">sys.columns.max_length: size in bytes, or -1 for (max)</param>
+        /// <param name="precision">sys.columns.precision</param>
+        /// <param name="scale">sys.columns.scale</param>
+        /// <param name="isIdentity">Whether the column is an IDENTITY column</param>
+        internal static string FormatDataType(string typeName, short maxLength, byte precision, byte scale, bool isIdentity)
+        {
+            string dataType = typeName;
+            switch (typeName.ToLowerInvariant())
+            {
+                case "char":
+                case "varchar":
+                case "binary":
+                case "varbinary":
+                    dataType += (maxLength == -1) ? "(max)" : "(" + maxLength.ToString() + ")";
+                    break;
+                case "nchar":
+                case "nvarchar":
+                    // max_length is in bytes, and each Unicode character takes two
+                    dataType += (maxLength == -1) ? "(max)" : "(" + (maxLength / 2).ToString() + ")";
+                    break;
+                case "decimal":
+                case "numeric":
+                    dataType += "(" + precision.ToString() + "," + scale.ToString() + ")";
+                    break;
+                case "datetime2":
+                case "datetimeoffset":
+                case "time":
+                    dataType += "(" + scale.ToString() + ")";
+                    break;
+                case "float":
+                    if (precision != 53)
+                    {
+                        dataType += "(" + precision.ToString() + ")";
+                    }
+                    break;
+            }
+
+            if (isIdentity)
+            {
+                dataType += " identity";
+            }
+
+            return dataType;
+        }
+
+        internal static DBSchema populateXMLSchema(string schemaXMLFile)
         {
             DBSchema xmlSchema = new DBSchema();
 
             XmlReaderSettings settings = new XmlReaderSettings();
             settings.IgnoreWhitespace = true;
 
-            XmlReader reader = XmlReader.Create(schemaXMLFile, settings);
-            reader.MoveToContent();
-            reader.ReadStartElement("tables");
-            while ((reader.NodeType == XmlNodeType.Element) && (reader.Name == "table"))
+            // Dispose the reader even when parsing fails, so the file is not left locked
+            using (XmlReader reader = XmlReader.Create(schemaXMLFile, settings))
             {
-                DBTable table = xmlSchema.AddTable(reader.GetAttribute("name"));
-                reader.ReadStartElement();
+                reader.MoveToContent();
+                if (reader.IsEmptyElement)
+                {
+                    // <tables />
+                    reader.ReadStartElement("tables");
+                    return xmlSchema;
+                }
+
+                reader.ReadStartElement("tables");
                 while (reader.NodeType == XmlNodeType.Element)
                 {
-                    switch (reader.Name)
+                    if (reader.Name != "table")
                     {
-                        case "column":
-                            populateXMLColumn(reader, table);
-                            break;
-                        case "primary_key":
-                            populateXMLPrimaryKey(reader, table);
-                            break;
-                        case "index":
-                            populateXMLIndex(reader, table);
-                            break;
-                        case "foreign_key":
-                            populateXMLForeignKey(reader, table);
-                            break;
-                        case "default_record":
-                            populateXMLDefaultRecord(reader, table);
-                            break;
+                        // Unknown elements are ignored, so newer files can still be read
+                        reader.Skip();
+                        continue;
                     }
+
+                    DBTable table = xmlSchema.AddTable(reader.GetAttribute("name"));
+                    if (reader.IsEmptyElement)
+                    {
+                        // <table name="..." /> has no children to read
+                        reader.Read();
+                        continue;
+                    }
+
+                    reader.ReadStartElement();
+                    while (reader.NodeType == XmlNodeType.Element)
+                    {
+                        switch (reader.Name)
+                        {
+                            case "column":
+                                populateXMLColumn(reader, table);
+                                break;
+                            case "primary_key":
+                                populateXMLPrimaryKey(reader, table);
+                                break;
+                            case "index":
+                                populateXMLIndex(reader, table);
+                                break;
+                            case "foreign_key":
+                                populateXMLForeignKey(reader, table);
+                                break;
+                            case "default_record":
+                                populateXMLDefaultRecord(reader, table);
+                                break;
+                            default:
+                                // Without this an unknown element was never consumed and the loop never ended
+                                reader.Skip();
+                                break;
+                        }
+                    }
+                    reader.ReadEndElement();
                 }
                 reader.ReadEndElement();
             }
-            reader.ReadEndElement();
-            reader.Close();
 
             return xmlSchema;
         }
@@ -633,7 +727,7 @@ namespace ScorpioConcepts.Framework.DBSchema
             this.Tables = new Dictionary<string, DBTable>();
         }
 
-        private DBTable AddTable(string tableName)
+        internal DBTable AddTable(string tableName)
         {
             if (this.Tables.ContainsKey(tableName) == true)
             {

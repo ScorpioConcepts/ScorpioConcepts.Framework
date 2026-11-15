@@ -15,7 +15,8 @@ namespace ScorpioConcepts.Framework.LogServer
         private string address;
         private volatile bool terminate = false;
 
-        private Mutex logMutex;
+        // Guards unsentLines, which the server thread fills through Send()
+        private readonly object sendLock = new object();
         private Queue<string> unsentLines;
 
         internal event ThreadEnd onThreadEnd;
@@ -26,7 +27,6 @@ namespace ScorpioConcepts.Framework.LogServer
             this.client_thread = new Thread(this._exec);
             this.stream = client.GetStream();
             this.address = client.Client.RemoteEndPoint.ToString();
-            this.logMutex = new Mutex();
             this.unsentLines = new Queue<string>();
         }
 
@@ -62,12 +62,18 @@ namespace ScorpioConcepts.Framework.LogServer
                         }
                     }
 
-                    if ((unsentLines.Count > 0) && (logMutex.WaitOne() == true))
+                    string[] lines = null;
+                    lock (sendLock)
                     {
-                        string[] lines = this.unsentLines.ToArray();
-                        unsentLines.Clear();
-                        logMutex.ReleaseMutex();
+                        if (this.unsentLines.Count > 0)
+                        {
+                            lines = this.unsentLines.ToArray();
+                            this.unsentLines.Clear();
+                        }
+                    }
 
+                    if (lines != null)
+                    {
                         foreach (string line in lines)
                         {
                             byte[] lineData = Encoding.ASCII.GetBytes(line + "\r\n");
@@ -79,7 +85,8 @@ namespace ScorpioConcepts.Framework.LogServer
                 }
                 catch
                 {
-
+                    // A failed read or write means the connection is broken, and it will not recover
+                    this.terminate = true;
                 }
             }
 
@@ -114,16 +121,9 @@ namespace ScorpioConcepts.Framework.LogServer
         /// <param name="line"></param>
         internal void Send(string line)
         {
-            if (logMutex.WaitOne() == true)
+            lock (sendLock)
             {
-                try
-                {
-                    this.unsentLines.Enqueue(line);
-                }
-                finally
-                {
-                    logMutex.ReleaseMutex();
-                }
+                this.unsentLines.Enqueue(line);
             }
         }
     }
