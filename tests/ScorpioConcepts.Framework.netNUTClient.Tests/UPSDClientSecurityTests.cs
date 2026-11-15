@@ -1,3 +1,5 @@
+using System.Text;
+
 namespace ScorpioConcepts.Framework.netNUTClient.Tests;
 
 /// <summary>
@@ -101,8 +103,11 @@ public sealed class UPSDClientSecurityTests : IDisposable
     [Fact]
     public void UTF8_replies_are_decoded_even_when_a_character_is_split_across_packets()
     {
-        _server.FragmentSize = 1;
-        _server.Reply("GET UPSDESC rack", "UPSDESC rack \"Café ☕ rack\"\n");
+        const string reply = "UPSDESC rack \"Café ☕ rack\"\n";
+        // Byte offsets inside é (2 bytes in UTF-8) and inside ☕ (3 bytes), so both arrive in two pieces
+        int e = Encoding.UTF8.GetByteCount(reply[..reply.IndexOf('é')]);
+        int cup = Encoding.UTF8.GetByteCount(reply[..reply.IndexOf('☕')]);
+        _server.ReplyInPieces("GET UPSDESC rack", reply, e + 1, cup + 1, cup + 2);
 
         _client.GetUPSDescription("rack").ShouldBe("Café ☕ rack");
     }

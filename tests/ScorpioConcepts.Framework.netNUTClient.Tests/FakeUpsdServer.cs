@@ -18,6 +18,7 @@ internal sealed class FakeUpsdServer : IDisposable
     private readonly TcpListener _listener;
     private readonly ConcurrentDictionary<string, string> _replies = new();
     private readonly ConcurrentDictionary<string, TimeSpan> _delays = new();
+    private readonly ConcurrentDictionary<string, int[]> _splits = new();
     private readonly CancellationTokenSource _cts = new();
     private readonly Task _serverTask;
     private TcpClient? _client;
@@ -56,6 +57,17 @@ internal sealed class FakeUpsdServer : IDisposable
     {
         _replies[command] = reply;
         return this;
+    }
+
+    /// <summary>
+    /// Answer <paramref name="command"/> in separate writes, split at the given byte offsets of the UTF-8 reply,
+    /// with a short pause between them. Splitting at a few chosen points tests reassembly without the cost of
+    /// sending every byte separately, which is slow enough on a busy CI runner to hit the client's reply timeout.
+    /// </summary>
+    public FakeUpsdServer ReplyInPieces(string command, string reply, params int[] splitAtBytes)
+    {
+        _splits[command] = splitAtBytes;
+        return Reply(command, reply);
     }
 
     /// <summary>Answer <paramref name="command"/> only after <paramref name="delay"/>.</summary>
@@ -150,7 +162,8 @@ internal sealed class FakeUpsdServer : IDisposable
 
                     if (_delays.TryGetValue(command, out var delay)) await Task.Delay(delay, _cts.Token);
                     string reply = _replies.TryGetValue(command, out var r) ? r : "ERR UNKNOWN-COMMAND\n";
-                    await SendAsync(stream, reply);
+                    if (_splits.TryGetValue(command, out var splitAt)) await SendInPiecesAsync(stream, reply, splitAt);
+                    else await SendAsync(stream, reply);
 
                     if (command == "LOGOUT") return;
                 }
@@ -178,6 +191,19 @@ internal sealed class FakeUpsdServer : IDisposable
             await stream.WriteAsync(data.AsMemory(offset, Math.Min(size, data.Length - offset)), _cts.Token);
             await stream.FlushAsync(_cts.Token);
             await Task.Delay(20, _cts.Token);
+        }
+    }
+
+    private async Task SendInPiecesAsync(Stream stream, string reply, int[] splitAtBytes)
+    {
+        byte[] data = Encoding.UTF8.GetBytes(reply);
+        int start = 0;
+        foreach (int split in splitAtBytes.Where(s => s > 0 && s < data.Length).Order().Append(data.Length))
+        {
+            await stream.WriteAsync(data.AsMemory(start, split - start), _cts.Token);
+            await stream.FlushAsync(_cts.Token);
+            await Task.Delay(20, _cts.Token);
+            start = split;
         }
     }
 
