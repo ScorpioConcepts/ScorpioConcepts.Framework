@@ -23,7 +23,13 @@ Shared settings for the four libraries live in the root `Directory.Build.props`:
 - each folder's `README.md` as the package README
 - in CI only, deterministic builds and warnings as errors
 
-Each library csproj holds only `PackageId`, `Version`, `Title`, `Description`, `PackageReleaseNotes` and its dependencies. When releasing, bump `<Version>` and update `<PackageReleaseNotes>`. A library csproj that still sets `<AnalysisLevel>latest</AnalysisLevel>` hasn't had its analyzer warnings fixed yet; remove that line when you clean it up. Every change must still compile for `netstandard2.0`, so avoid APIs that only exist in newer .NET, and C# features that need runtime support netstandard2.0 lacks.
+Each library csproj holds only `PackageId`, `Version`, `Title`, `Description`, `PackageReleaseNotes` and its dependencies. When releasing, bump `<Version>` and update `<PackageReleaseNotes>`. A library csproj that still sets `<AnalysisLevel>latest</AnalysisLevel>` hasn't had its analyzer warnings fixed yet; remove that line when you clean it up.
+
+Every change must still compile for `netstandard2.0`.
+- `LangVersion` is `latest` everywhere, so modern syntax works on both targets. A feature that needs runtime support fails to compile for `netstandard2.0`.
+- APIs that only exist in newer .NET need `#if NET`.
+- The analyzer rules that only suggest such APIs (CA1510, CA1835, CA1865 and so on) are turned off in `Directory.Build.props`.
+- A library with `<Nullable>enable</Nullable>` has nullable-annotated public APIs. netNUTClient has it now; the others get it in their own PRs.
 
 DBSchema uses `Microsoft.Data.SqlClient`, with a different version per target: 7.x for `net10.0` and 5.2.x for `netstandard2.0`, because 6.0 and later no longer ship a .NET Standard build. Keep the conditional `PackageReference` groups in its csproj when updating them.
 
@@ -55,5 +61,10 @@ dotnet test --project tests/ScorpioConcepts.Framework.LogServer.Tests --filter-m
 
 - **LogServer**: `LogServer` runs a `TcpListener` (default port 446) on its own thread. It keeps a bounded queue of recent lines (`logSize`) that new telnet clients get first, then it streams new lines to every connected `LogServer_Client`. Shared state is guarded by a `Mutex`. Errors surface through the `onServerException` event, and connect/disconnect through events too. Callers must `Stop()` and then `Join()`.
 - **PlugIn**: generic `PlugInManager<TPlugIn, THost>` where `TPlugIn : IPlugIn<THost>` and `THost : IPlugInHost`. `Find(dir)` loads every top-level `*.dll` with `Assembly.LoadFrom`, makes an instance of each non-abstract type that implements the plugin interface (via `Activator.CreateInstance`, so it needs a parameterless constructor), and calls `Initialize(host)`. Exceptions go to `host.ThrowException` instead of being thrown.
-- **netNUTClient**: `UPSDClient` is a synchronous TCP client for the NUT `upsd` text protocol (LIST/GET/SET/INSTCMD/LOGIN and so on). `UPSException.ErrorCode` maps upsd `ERR` responses. `UPS` parses `LIST UPS` lines.
+- **netNUTClient**: `UPSDClient` is a client for the NUT `upsd` text protocol (LIST, GET, SET, INSTCMD, LOGIN, STARTTLS and so on).
+  - **Sync and async:** every command is async at its core (`SendLockedAsync`), and the synchronous methods call the async ones.
+  - **One command at a time:** a `SemaphoreSlim` sends one command at a time, so the client is safe to share between threads.
+  - **Dropped connections:** a timeout, a cancellation, the server closing the connection, or an I/O error drops the connection (`Connected` becomes false), so a late reply can never be read as the next command's reply. An `ERR` reply keeps the connection.
+  - **`NutProtocol`** holds the protocol rules: `Word` checks names, `Quote` escapes values, `Tokenize` splits reply lines, and `ParseServer` handles host, port and IPv6. Every argument must go through `Word` or `Quote`; that is what stops values from injecting commands.
+  - **Errors:** `UPSException.ErrorCode` maps upsd `ERR` replies, and keeps the protocol's names with `-` written as `_`.
 - **DBSchema**: a static API on `DBSchema` (`InitializeDB(SqlConnection)`, `GenerateSchema`, `CheckDatabaseSchema`, `ConvertSchema`). It reads the SQL Server schema into `DBTable` objects, compares them with a schema file, and changes the database structure to match. Schema files are JSON by default (`DBSchemaJson`); the original XML format (`DBSchemaXml`) is still supported, and `CheckDatabaseSchema` detects which one a file uses from its first character. `GenerateSchemaXML` is kept for existing XML users. Default rows (`DBDefaultRecords`) can be included too. It handles structure only; it is not an ORM. Activity is recorded in `DBSchema.DebugLog`.

@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Diagnostics.CodeAnalysis;
 
 namespace ScorpioConcepts.Framework.netNUTClient
 {
@@ -10,6 +11,8 @@ namespace ScorpioConcepts.Framework.netNUTClient
         /// <summary>
         /// List of possible error codes returned by UPSD
         /// </summary>
+        [SuppressMessage("Naming", "CA1707:Identifiers should not contain underscores",
+            Justification = "The names match the upsd protocol's error codes, with '-' written as '_', and are how replies are mapped.")]
         public enum ErrorCode
         {
             /// <summary>
@@ -124,7 +127,6 @@ namespace ScorpioConcepts.Framework.netNUTClient
         {
             get
             {
-                // TODO: Still need to add friendly messages for all the error codes returned by UPSD
                 switch(this.Code)
                 {
                     case ErrorCode.ACCESS_DENIED:
@@ -135,8 +137,46 @@ namespace ScorpioConcepts.Framework.netNUTClient
                         return "Variable not supported by UPS";
                     case ErrorCode.CMD_NOT_SUPPORTED:
                         return "Instant Command not supported by UPS";
+                    case ErrorCode.INVALID_ARGUMENT:
+                        return "Invalid argument";
+                    case ErrorCode.INSTCMD_FAILED:
+                        return "Instant Command could not be delivered to the UPS driver";
+                    case ErrorCode.SET_FAILED:
+                        return "Variable change could not be delivered to the UPS driver";
+                    case ErrorCode.READONLY:
+                        return "Variable is read-only";
+                    case ErrorCode.TOO_LONG:
+                        return "Value is too long";
+                    case ErrorCode.FEATURE_NOT_SUPPORTED:
+                        return "Feature not supported by this server";
+                    case ErrorCode.FEATURE_NOT_CONFIGURED:
+                        return "Feature not configured on this server";
+                    case ErrorCode.ALREADY_SSL_MODE:
+                        return "Connection is already encrypted";
+                    case ErrorCode.DRIVER_NOT_CONNECTED:
+                        return "UPS driver is not connected";
+                    case ErrorCode.DATA_STALE:
+                        return "UPS data is stale";
+                    case ErrorCode.ALREADY_LOGGED_IN:
+                        return "Already logged in to a UPS";
+                    case ErrorCode.INVALID_PASSWORD:
+                        return "Invalid password";
+                    case ErrorCode.ALREADY_SET_PASSWORD:
+                        return "Password already set";
+                    case ErrorCode.INVALID_USERNAME:
+                        return "Invalid username";
+                    case ErrorCode.ALREADY_SET_USERNAME:
+                        return "Username already set";
+                    case ErrorCode.USERNAME_REQUIRED:
+                        return "Username required";
+                    case ErrorCode.PASSWORD_REQUIRED:
+                        return "Password required";
+                    case ErrorCode.UNKNOWN_COMMAND:
+                        return "Unknown command";
+                    case ErrorCode.INVALID_VALUE:
+                        return "Invalid value";
                     default:
-                        return this.Code.ToString();
+                        return "Unknown error";
                 }
             }
         }
@@ -150,6 +190,34 @@ namespace ScorpioConcepts.Framework.netNUTClient
             :base(message)
         {
             this.Code = code;
+        }
+
+        /// <summary>
+        /// Create a new UPSException with <see cref="ErrorCode.UNKNOWN_ERROR"/>
+        /// </summary>
+        public UPSException()
+            : this(ErrorCode.UNKNOWN_ERROR, string.Empty)
+        {
+        }
+
+        /// <summary>
+        /// Create a new UPSException with <see cref="ErrorCode.UNKNOWN_ERROR"/>
+        /// </summary>
+        /// <param name="message">Error message</param>
+        public UPSException(string message)
+            : this(ErrorCode.UNKNOWN_ERROR, message)
+        {
+        }
+
+        /// <summary>
+        /// Create a new UPSException with <see cref="ErrorCode.UNKNOWN_ERROR"/>
+        /// </summary>
+        /// <param name="message">Error message</param>
+        /// <param name="innerException">The exception that caused this one</param>
+        public UPSException(string message, Exception innerException)
+            : base(message, innerException)
+        {
+            this.Code = ErrorCode.UNKNOWN_ERROR;
         }
     }
 }
