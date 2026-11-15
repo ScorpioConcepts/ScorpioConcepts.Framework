@@ -6,32 +6,38 @@ namespace ScorpioConcepts.Framework.LogServer.Tests;
 
 public sealed class LogServerTests : IDisposable
 {
-    private readonly int _port = Wait.FreePort();
-    private readonly List<LogServer> _started = new();
+    private readonly List<LogServer> _servers = new();
 
     public void Dispose()
     {
-        foreach (var server in _started)
-        {
-            server.Stop();
-            server.Join();
-        }
+        foreach (var server in _servers) server.Dispose();
+    }
+
+    /// <summary>A server on loopback and any free port; its real port is in <see cref="LogServer.LocalEndpoint"/>.</summary>
+    private LogServer NewServer(string greeting = "Test Log Server", int logSize = 10)
+    {
+        var server = new LogServer(IPAddress.Loopback, 0, greeting, logSize);
+        _servers.Add(server);
+        return server;
     }
 
     private LogServer StartServer(string greeting = "Test Log Server", int logSize = 10, Action<LogServer>? configure = null)
     {
-        var server = new LogServer(_port, greeting, logSize);
+        var server = NewServer(greeting, logSize);
         configure?.Invoke(server);
         server.Start();
-        _started.Add(server);
-        Wait.Until(() => server.Active, "the server is running");
+        server.Active.ShouldBeTrue();
         return server;
     }
+
+    private static int PortOf(LogServer server) => server.LocalEndpoint!.Port;
+
+    // ---- History ----
 
     [Fact]
     public void LogHistory_keeps_lines_logged_before_Start()
     {
-        var server = new LogServer(_port, "greeting", 10);
+        var server = NewServer();
 
         server.Log("one");
         server.Log("two");
@@ -43,7 +49,7 @@ public sealed class LogServerTests : IDisposable
     [Fact]
     public void LogHistory_keeps_only_the_most_recent_lines()
     {
-        var server = new LogServer(_port, "greeting", 3);
+        var server = NewServer(logSize: 3);
 
         for (int i = 1; i <= 5; i++) server.Log("line " + i);
 
@@ -51,28 +57,131 @@ public sealed class LogServerTests : IDisposable
     }
 
     [Fact]
-    public void LogHistory_returns_a_copy()
+    public void LogHistory_returns_a_snapshot()
     {
-        var server = new LogServer(_port, "greeting", 10);
+        var server = NewServer();
         server.Log("original");
+        var history = server.LogHistory;
 
-        server.LogHistory[0] = "changed";
+        server.Log("later");
 
-        server.LogHistory.ShouldBe(new[] { "original" });
+        history.ShouldBe(new[] { "original" });
+        server.LogHistory.ShouldBe(new[] { "original", "later" });
     }
+
+    [Fact]
+    public void Zero_log_size_keeps_no_history()
+    {
+        var server = NewServer(logSize: 0);
+
+        server.Log("gone");
+
+        server.LogHistory.ShouldBeEmpty();
+    }
+
+    // ---- Construction ----
+
+    [Fact]
+    public void Default_port_is_7446()
+    {
+        LogServer.DefaultPort.ShouldBe(7446);
+    }
+
+    [Fact]
+    public void Default_constructor_listens_on_every_interface_and_the_default_port()
+    {
+        // 7446 may already be in use on a developer machine, so accept that outcome too
+        var errors = new ConcurrentQueue<Exception>();
+        var server = new LogServer("greeting", 10);
+        _servers.Add(server);
+        server.ServerError += (_, e) => errors.Enqueue(e.Exception);
+
+        server.Start();
+
+        if (errors.IsEmpty)
+        {
+            server.LocalEndpoint.ShouldBe(new IPEndPoint(IPAddress.Any, 7446));
+            using var client = new LogClient(7446);
+            client.ReadLines(1).ShouldBe(new[] { "greeting" });
+        }
+        else
+        {
+            errors.Single().ShouldBeOfType<SocketException>().SocketErrorCode.ShouldBe(SocketError.AddressAlreadyInUse);
+        }
+    }
+
+    [Fact]
+    public void Can_listen_on_loopback_only()
+    {
+        var server = StartServer();
+
+        server.LocalEndpoint!.Address.ShouldBe(IPAddress.Loopback);
+        server.LocalEndpoint.Port.ShouldBeGreaterThan(0);
+    }
+
+    [Fact]
+    public void Port_constructor_listens_on_every_interface()
+    {
+        var server = new LogServer(0, "greeting", 10);
+        _servers.Add(server);
+
+        server.Start();
+
+        server.LocalEndpoint!.Address.ShouldBe(IPAddress.Any);
+    }
+
+    [Fact]
+    public void Constructor_rejects_invalid_arguments()
+    {
+        Should.Throw<ArgumentNullException>(() => new LogServer(null!, 0, "g", 10)).ParamName.ShouldBe("address");
+        Should.Throw<ArgumentOutOfRangeException>(() => new LogServer(IPAddress.Loopback, 70000, "g", 10)).ParamName.ShouldBe("port");
+        Should.Throw<ArgumentOutOfRangeException>(() => new LogServer(IPAddress.Loopback, -1, "g", 10)).ParamName.ShouldBe("port");
+        Should.Throw<ArgumentNullException>(() => new LogServer(IPAddress.Loopback, 0, null!, 10)).ParamName.ShouldBe("greetingMessage");
+        Should.Throw<ArgumentOutOfRangeException>(() => new LogServer(IPAddress.Loopback, 0, "g", -1)).ParamName.ShouldBe("logSize");
+    }
+
+    [Fact]
+    public void Limits_reject_values_below_one()
+    {
+        var server = NewServer();
+
+        Should.Throw<ArgumentOutOfRangeException>(() => server.MaxClients = 0);
+        Should.Throw<ArgumentOutOfRangeException>(() => server.MaxQueuedLines = 0);
+        server.MaxClients.ShouldBe(LogServer.DefaultMaxClients);
+        server.MaxQueuedLines.ShouldBe(LogServer.DefaultMaxQueuedLines);
+    }
+
+    [Fact]
+    public void Log_rejects_null()
+    {
+        Should.Throw<ArgumentNullException>(() => NewServer().Log(null!));
+    }
+
+    // ---- Starting and stopping ----
 
     [Fact]
     public void Stop_and_Join_shut_the_server_down()
     {
-        var server = new LogServer(_port, "greeting", 10);
-        server.Start();
-        Wait.Until(() => server.Active, "the server is running");
+        var server = StartServer();
+        int port = PortOf(server);
 
         server.Stop();
         server.Join();
 
         server.Active.ShouldBeFalse();
-        Should.Throw<SocketException>(() => new TcpClient("127.0.0.1", _port));
+        Should.Throw<SocketException>(() => new TcpClient("127.0.0.1", port));
+    }
+
+    [Fact]
+    public void Dispose_stops_the_server()
+    {
+        var server = StartServer();
+        int port = PortOf(server);
+
+        server.Dispose();
+
+        server.Active.ShouldBeFalse();
+        Should.Throw<SocketException>(() => new TcpClient("127.0.0.1", port));
     }
 
     [Fact]
@@ -80,7 +189,7 @@ public sealed class LogServerTests : IDisposable
     {
         for (int i = 0; i < 20; i++)
         {
-            var server = new LogServer(Wait.FreePort(), "greeting", 10);
+            var server = NewServer();
 
             server.Start();
             server.Stop();
@@ -92,16 +201,151 @@ public sealed class LogServerTests : IDisposable
     }
 
     [Fact]
+    public void Start_twice_is_rejected()
+    {
+        var server = StartServer();
+
+        Should.Throw<InvalidOperationException>(server.Start);
+    }
+
+    [Fact]
+    public void Join_without_Start_returns_immediately()
+    {
+        Should.NotThrow(NewServer().Join);
+    }
+
+    [Fact]
+    public void Port_in_use_raises_ServerError_from_Start()
+    {
+        var blocker = new TcpListener(IPAddress.Loopback, 0);
+        blocker.Start();
+        try
+        {
+            var errors = new ConcurrentQueue<Exception>();
+            var server = new LogServer(IPAddress.Loopback, ((IPEndPoint)blocker.LocalEndpoint).Port, "greeting", 10);
+            _servers.Add(server);
+            server.ServerError += (sender, e) =>
+            {
+                sender.ShouldBeSameAs(server);
+                errors.Enqueue(e.Exception);
+            };
+
+            server.Start();
+
+            // Reported before Start() returns, and the server never becomes active
+            errors.ShouldHaveSingleItem().ShouldBeOfType<SocketException>().SocketErrorCode.ShouldBe(SocketError.AddressAlreadyInUse);
+            server.Active.ShouldBeFalse();
+            server.LocalEndpoint.ShouldBeNull();
+            Should.NotThrow(server.Join);
+        }
+        finally
+        {
+            blocker.Stop();
+        }
+    }
+
+    [Fact]
+    public void Clients_can_connect_as_soon_as_Start_returns()
+    {
+        for (int i = 0; i < 20; i++)
+        {
+            var server = StartServer(greeting: "ready");
+            using var client = new LogClient(PortOf(server));
+            client.ReadLines(1).ShouldBe(new[] { "ready" });
+            server.Dispose();
+        }
+    }
+
+    [Fact]
+    public void Stopping_the_server_closes_client_connections()
+    {
+        var disconnected = new ConcurrentQueue<string>();
+        var server = StartServer(greeting: "hi", configure: s => s.ClientDisconnected += (_, e) => disconnected.Enqueue(e.Address));
+        using var client = new LogClient(PortOf(server));
+        client.ReadLines(1);
+
+        server.Stop();
+        server.Join();
+
+        client.WaitForServerClose().ShouldBeTrue();
+        disconnected.Count.ShouldBe(1, "stopping counts as a disconnect");
+    }
+
+    // ---- Streaming ----
+
+    [Fact]
+    public void New_client_receives_greeting_then_history()
+    {
+        var server = StartServer(greeting: "Welcome to the log");
+        server.Log("first");
+        server.Log("second");
+
+        using var client = new LogClient(PortOf(server));
+
+        client.ReadLines(3).ShouldBe(new[] { "Welcome to the log", "first", "second" });
+    }
+
+    [Fact]
+    public void New_client_only_receives_the_retained_history()
+    {
+        var server = StartServer(greeting: "hello", logSize: 2);
+        server.Log("a");
+        server.Log("b");
+        server.Log("c");
+
+        using var client = new LogClient(PortOf(server));
+
+        client.ReadLines(3).ShouldBe(new[] { "hello", "b", "c" });
+    }
+
+    [Fact]
+    public void Lines_logged_while_connected_are_streamed_to_every_client()
+    {
+        var server = StartServer(greeting: "hi");
+        using var first = new LogClient(PortOf(server));
+        using var second = new LogClient(PortOf(server));
+        first.ReadLines(1);
+        second.ReadLines(1);
+
+        server.Log("live line");
+
+        first.ReadLines(2).ShouldBe(new[] { "hi", "live line" });
+        second.ReadLines(2).ShouldBe(new[] { "hi", "live line" });
+    }
+
+    [Fact]
+    public void Lines_are_sent_as_UTF8()
+    {
+        var server = StartServer(greeting: "Grüße");
+        using var client = new LogClient(PortOf(server));
+        client.ReadLines(1);
+
+        server.Log("Café ☕ naïve 日本語");
+
+        client.ReadLines(2).ShouldBe(new[] { "Grüße", "Café ☕ naïve 日本語" });
+    }
+
+    [Fact]
+    public void Input_from_the_client_is_ignored()
+    {
+        var server = StartServer(greeting: "hi");
+        using var client = new LogClient(PortOf(server));
+        client.ReadLines(1);
+
+        client.Send("some typing from the user\r\n");
+        Thread.Sleep(200);
+        server.Log("still working");
+
+        client.ReadLines(2).ShouldBe(new[] { "hi", "still working" });
+    }
+
+    [Fact]
     public async Task Clients_see_every_line_exactly_once_while_others_connect()
     {
         const int lineCount = 2000;
         var errors = new ConcurrentQueue<Exception>();
-        var connected = new ConcurrentQueue<string>();
-        var server = StartServer(greeting: "hi", logSize: lineCount, configure: s =>
-        {
-            s.onServerException += errors.Enqueue;
-            s.onClientConnect += connected.Enqueue;
-        });
+        var server = StartServer(greeting: "hi", logSize: lineCount, configure: s => s.ServerError += (_, e) => errors.Enqueue(e.Exception));
+        int port = PortOf(server);
 
         // Log steadily while clients join part way through. Each client must end up with the
         // full log once, however its connection lined up with the lines being logged.
@@ -119,7 +363,7 @@ public sealed class LogServerTests : IDisposable
         {
             while (!logger.IsCompleted && clients.Count < 8)
             {
-                clients.Add(new LogClient(_port));
+                clients.Add(new LogClient(port));
                 Thread.Sleep(50);
             }
             await logger.WaitAsync(Wait.Timeout, TestContext.Current.CancellationToken);
@@ -146,9 +390,10 @@ public sealed class LogServerTests : IDisposable
         var disconnected = 0;
         var server = StartServer(greeting: "hi", configure: s =>
         {
-            s.onServerException += errors.Enqueue;
-            s.onClientDisconnect += _ => Interlocked.Increment(ref disconnected);
+            s.ServerError += (_, e) => errors.Enqueue(e.Exception);
+            s.ClientDisconnected += (_, _) => Interlocked.Increment(ref disconnected);
         });
+        int port = PortOf(server);
 
         using var stop = new CancellationTokenSource();
         var logger = Task.Run(() =>
@@ -158,7 +403,7 @@ public sealed class LogServerTests : IDisposable
 
         Parallel.For(0, 40, new ParallelOptions { MaxDegreeOfParallelism = 8 }, _ =>
         {
-            using var client = new LogClient(_port);
+            using var client = new LogClient(port);
             client.ReadLines(1);
         });
 
@@ -168,186 +413,81 @@ public sealed class LogServerTests : IDisposable
 
         errors.ShouldBeEmpty();
         server.Active.ShouldBeTrue();
-        using var last = new LogClient(_port);
+        server.ConnectedClients.ShouldBe(0);
+        using var last = new LogClient(port);
         last.ReadLines(1)[0].ShouldBe("hi");
     }
 
-    [Fact]
-    public void New_client_receives_greeting_then_history()
-    {
-        var server = StartServer(greeting: "Welcome to the log");
-        server.Log("first");
-        server.Log("second");
-        Wait.Until(() => server.LogHistory.Length == 2, "lines are logged");
-
-        using var client = new LogClient(_port);
-
-        client.ReadLines(3).ShouldBe(new[] { "Welcome to the log", "first", "second" });
-    }
-
-    [Fact]
-    public void New_client_only_receives_the_retained_history()
-    {
-        var server = StartServer(greeting: "hello", logSize: 2);
-        server.Log("a");
-        server.Log("b");
-        server.Log("c");
-
-        using var client = new LogClient(_port);
-
-        client.ReadLines(3).ShouldBe(new[] { "hello", "b", "c" });
-    }
-
-    [Fact]
-    public void Lines_logged_while_connected_are_streamed_to_every_client()
-    {
-        var connected = new ConcurrentQueue<string>();
-        var server = StartServer(greeting: "hi", configure: s => s.onClientConnect += connected.Enqueue);
-        using var first = new LogClient(_port);
-        using var second = new LogClient(_port);
-        Wait.Until(() => connected.Count == 2, "both clients are connected");
-        first.ReadLines(1);
-        second.ReadLines(1);
-
-        server.Log("live line");
-
-        first.ReadLines(2).ShouldBe(new[] { "hi", "live line" });
-        second.ReadLines(2).ShouldBe(new[] { "hi", "live line" });
-    }
-
-    [Fact]
-    public void Input_from_the_client_is_ignored()
-    {
-        var connected = new ConcurrentQueue<string>();
-        var server = StartServer(greeting: "hi", configure: s => s.onClientConnect += connected.Enqueue);
-        using var client = new LogClient(_port);
-        Wait.Until(() => connected.Count == 1, "the client is connected");
-
-        client.Send("some typing from the user\r\n");
-        Thread.Sleep(200);
-        server.Log("still working");
-
-        client.ReadLines(2).ShouldBe(new[] { "hi", "still working" });
-    }
+    // ---- Events ----
 
     [Fact]
     public void Connect_and_disconnect_events_report_the_client_address()
     {
         var connected = new ConcurrentQueue<string>();
         var disconnected = new ConcurrentQueue<string>();
-        StartServer(configure: s =>
+        var server = StartServer(configure: s =>
         {
-            s.onClientConnect += connected.Enqueue;
-            s.onClientDisconnect += disconnected.Enqueue;
+            s.ClientConnected += (_, e) => connected.Enqueue(e.Address);
+            s.ClientDisconnected += (_, e) => disconnected.Enqueue(e.Address);
         });
 
         string address;
-        using (var client = new LogClient(_port))
+        using (var client = new LogClient(PortOf(server)))
         {
             address = client.LocalAddress;
             Wait.Until(() => connected.Count == 1, "the connect event is raised");
+            server.ConnectedClients.ShouldBe(1);
         }
 
         Wait.Until(() => disconnected.Count == 1, "the disconnect event is raised");
         connected.ShouldBe(new[] { address });
         disconnected.ShouldBe(new[] { address });
+        server.ConnectedClients.ShouldBe(0);
+    }
+
+    // ---- Limits ----
+
+    [Fact]
+    public void Clients_beyond_MaxClients_are_told_and_disconnected()
+    {
+        var server = StartServer(greeting: "hi", configure: s => s.MaxClients = 2);
+        int port = PortOf(server);
+        using var first = new LogClient(port);
+        using var second = new LogClient(port);
+        first.ReadLines(1);
+        second.ReadLines(1);
+
+        using (var third = new LogClient(port))
+        {
+            third.ReadLines(1).ShouldBe(new[] { "Too many clients are connected to this log server. Try again later." });
+            third.WaitForServerClose().ShouldBeTrue();
+        }
+        server.ConnectedClients.ShouldBe(2);
+
+        // Once a place is free, a new client gets in
+        first.Dispose();
+        Wait.Until(() => server.ConnectedClients == 1, "the first client has gone");
+        using var fourth = new LogClient(port);
+        fourth.ReadLines(1).ShouldBe(new[] { "hi" });
     }
 
     [Fact]
-    public void Stopping_the_server_closes_client_connections()
+    public void A_client_that_stops_reading_cannot_grow_the_queue_past_MaxQueuedLines()
     {
-        var connected = new ConcurrentQueue<string>();
-        var server = new LogServer(_port, "hi", 10);
-        server.onClientConnect += connected.Enqueue;
-        server.Start();
-        using var client = new LogClient(_port);
-        Wait.Until(() => connected.Count == 1, "the client is connected");
+        const int lines = 100_000;
+        var server = StartServer(greeting: "hi", logSize: 0, configure: s => s.MaxQueuedLines = 100);
+        using var stalled = new LogClient(PortOf(server));
+        Wait.Until(() => server.ConnectedClients == 1, "the client is connected");
 
-        server.Stop();
-        server.Join();
+        // The client reads nothing while a lot is logged with long lines, so the socket buffers fill up
+        string padding = new('x', 200);
+        for (int i = 0; i < lines; i++) server.Log($"line {i} {padding}");
 
-        client.WaitForServerClose().ShouldBeTrue();
-    }
+        server.QueuedLinesPerClient().ShouldAllBe(count => count <= 100);
 
-    [Fact]
-    public void Port_in_use_raises_onServerException()
-    {
-        var blocker = new TcpListener(IPAddress.Any, _port);
-        blocker.Start();
-        try
-        {
-            var errors = new ConcurrentQueue<Exception>();
-            var server = new LogServer(_port, "greeting", 10);
-            server.onServerException += errors.Enqueue;
-
-            server.Start();
-
-            // Reported before Start() returns, and the server never becomes active
-            errors.ShouldHaveSingleItem().ShouldBeOfType<SocketException>().SocketErrorCode.ShouldBe(SocketError.AddressAlreadyInUse);
-            server.Active.ShouldBeFalse();
-            Should.NotThrow(server.Join);
-        }
-        finally
-        {
-            blocker.Stop();
-        }
-    }
-
-    [Fact]
-    public void Clients_can_connect_as_soon_as_Start_returns()
-    {
-        for (int i = 0; i < 20; i++)
-        {
-            int port = Wait.FreePort();
-            var server = new LogServer(port, "ready", 10);
-            server.Start();
-            try
-            {
-                server.Active.ShouldBeTrue();
-                using var client = new LogClient(port);
-                client.ReadLines(1).ShouldBe(new[] { "ready" });
-            }
-            finally
-            {
-                server.Stop();
-                server.Join();
-            }
-        }
-    }
-
-    [Fact]
-    public void Join_without_Start_returns_immediately()
-    {
-        Should.NotThrow(new LogServer(_port, "greeting", 10).Join);
-    }
-
-    [Fact]
-    public void Default_constructor_listens_on_port_446()
-    {
-        // Port 446 may be taken on a developer machine, or need root on Linux, so accept either outcome.
-        var errors = new ConcurrentQueue<Exception>();
-        var server = new LogServer("greeting", 10);
-        server.onServerException += errors.Enqueue;
-        server.Start();
-        try
-        {
-            server.Active.ShouldBe(errors.IsEmpty);
-            if (errors.IsEmpty)
-            {
-                using var client = new LogClient(446);
-                client.ReadLines(1).ShouldBe(new[] { "greeting" });
-            }
-            else
-            {
-                // In use on this machine, or (on Linux without root) a privileged port we may not bind to
-                errors.Single().ShouldBeOfType<SocketException>().SocketErrorCode
-                    .ShouldBeOneOf(SocketError.AddressAlreadyInUse, SocketError.AccessDenied);
-            }
-        }
-        finally
-        {
-            server.Stop();
-            server.Join();
-        }
+        // When it starts reading, it learns that lines were skipped and still gets the latest one
+        var received = stalled.ReadUntil(line => line.StartsWith($"line {lines - 1} ", StringComparison.Ordinal));
+        received.ShouldContain(line => line.StartsWith("*** ", StringComparison.Ordinal) && line.Contains("lines skipped"));
+        received.Length.ShouldBeLessThan(lines);
     }
 }

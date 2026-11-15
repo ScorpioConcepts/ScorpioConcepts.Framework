@@ -1,148 +1,215 @@
 ﻿using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
-using System.Net.Sockets;
-using System.Threading;
+using System.Diagnostics.CodeAnalysis;
+using System.IO;
+using System.Linq;
 using System.Net;
+using System.Net.Sockets;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace ScorpioConcepts.Framework.LogServer
 {
     /// <summary>
-    /// Simple TCP/IP Log Server that can be connected to by any telnet type application to watch the log file
+    /// A simple TCP log server: any telnet client that connects sees recent log lines, then every new one as it is logged.
     /// </summary>
-    public class LogServer
+    /// <remarks>
+    /// The server has no authentication or encryption, and by default it listens on every network interface
+    /// (<see cref="IPAddress.Any"/>), so anyone who can reach the machine can read the log. Never run it like that in
+    /// production: pass <see cref="IPAddress.Loopback"/> to only allow connections from the same machine, or a specific
+    /// internal address.
+    /// </remarks>
+    public sealed class LogServer : IDisposable
     {
-        /// <summary>
-        /// Delegate for the onClientConnect Event
-        /// </summary>
-        /// <param name="client">Address of Client that connected</param>
-        public delegate void ClientConnectedEvent(string client);
-        /// <summary>
-        /// Delegate for the onClientDisconnect Event
-        /// </summary>
-        /// <param name="client">Address of Client that disconnected</param>
-        public delegate void ClientDisconnectedEvent(string client);
-        /// <summary>
-        /// Delegate for the onServerException Event
-        /// </summary>
-        /// <param name="ex">Exception that occurred and was not handled</param>
-        public delegate void LogServerExceptionEvent(Exception ex);
+        /// <summary>The port used when none is given. It is above 1023, so it needs no root on Linux.</summary>
+        public const int DefaultPort = 7446;
+        /// <summary>The default for <see cref="MaxClients"/></summary>
+        public const int DefaultMaxClients = 32;
+        /// <summary>The default for <see cref="MaxQueuedLines"/></summary>
+        public const int DefaultMaxQueuedLines = 10000;
+
+        private static readonly byte[] TooManyClientsMessage =
+            Encoding.ASCII.GetBytes("Too many clients are connected to this log server. Try again later.\r\n");
+
+        private readonly TcpListener listener;
+        private readonly string greeting;
+        private readonly int maxLogSize;
+
+        // Guards logLines and clients: holding it while a client is added, and while a line is logged,
+        // means a new client gets every line exactly once, in its history or as a new line.
+        private readonly object logLock = new object();
+        private readonly Queue<string> logLines = new Queue<string>();
+        private readonly HashSet<LogServerClient> clients = new HashSet<LogServerClient>();
+
+        private volatile bool running;
+        private int started;
+        private int maxClients = DefaultMaxClients;
+        private int maxQueuedLines = DefaultMaxQueuedLines;
+        private IPEndPoint? localEndpoint;
+        private Task acceptLoop = Task.CompletedTask;
 
         /// <summary>
         /// Occurs when a new client connects to the server
         /// </summary>
-        public event ClientConnectedEvent onClientConnect;
+        public event EventHandler<LogClientEventArgs>? ClientConnected;
         /// <summary>
-        /// Occurs when a client disconnects from the server
+        /// Occurs when a client disconnects, or is disconnected because the server stopped
         /// </summary>
-        public event ClientDisconnectedEvent onClientDisconnect;
+        public event EventHandler<LogClientEventArgs>? ClientDisconnected;
         /// <summary>
-        /// Occurs when a exception occurs in the log server and is not handled internally
+        /// Occurs when the server cannot start, for example because its port is in use, or stops because of an error
         /// </summary>
-        public event LogServerExceptionEvent onServerException;
-
-        private TcpListener tcp_server;
-        private Thread server_thread;
-        private volatile bool running = false;
-
-        // Only the server thread uses this list
-        private List<LogServer_Client> clients;
-        // Client threads report that they ended through this queue, and the server thread removes them
-        private ConcurrentQueue<LogServer_Client> discon_clients;
-
-        private string greeting;
-
-        // Guards logLines and unsentLines, which Log() changes from the caller's thread
-        private readonly object logLock = new object();
-        private Queue<string> logLines;
-        private Queue<string> unsentLines;
-
-        private int maxLogSize;
+        public event EventHandler<LogServerErrorEventArgs>? ServerError;
 
         /// <summary>
-        /// Create a standard log server on port 446
+        /// Create a log server on <see cref="DefaultPort"/>, listening on every network interface.
+        /// Not for production: see the remarks on <see cref="LogServer"/>.
         /// </summary>
         /// <param name="greetingMessage">Greeting to send to clients when they connect</param>
-        /// <param name="logSize">Number of lines to keep in memory and return initially</param>
+        /// <param name="logSize">Number of lines to keep in memory and send to new clients</param>
         public LogServer(string greetingMessage, int logSize)
-            : this(446, greetingMessage, logSize)
+            : this(IPAddress.Any, DefaultPort, greetingMessage, logSize)
         { }
 
         /// <summary>
-        /// Create a standard log server on a custom port
+        /// Create a log server on a custom port, listening on every network interface.
+        /// Not for production: see the remarks on <see cref="LogServer"/>.
         /// </summary>
-        /// <param name="port">The port to listen on</param>
+        /// <param name="port">The port to listen on, or 0 for any free port (see <see cref="LocalEndpoint"/>)</param>
         /// <param name="greetingMessage">Greeting to send to clients when they connect</param>
-        /// <param name="logSize">Number of lines to keep in memory and return initially</param>
+        /// <param name="logSize">Number of lines to keep in memory and send to new clients</param>
         public LogServer(int port, string greetingMessage, int logSize)
-        {
-            this.tcp_server = new TcpListener(IPAddress.Any, port);
-            this.server_thread = new Thread(this._exec);
-            this.clients = new List<LogServer_Client>();
-            this.discon_clients = new ConcurrentQueue<LogServer_Client>();
+            : this(IPAddress.Any, port, greetingMessage, logSize)
+        { }
 
-            this.greeting = greetingMessage;
-            this.logLines = new Queue<string>();
-            this.unsentLines = new Queue<string>();
+        /// <summary>
+        /// Create a log server listening on a specific address and port
+        /// </summary>
+        /// <param name="address">The address to listen on, such as <see cref="IPAddress.Loopback"/> for this machine only</param>
+        /// <param name="port">The port to listen on, or 0 for any free port (see <see cref="LocalEndpoint"/>)</param>
+        /// <param name="greetingMessage">Greeting to send to clients when they connect</param>
+        /// <param name="logSize">Number of lines to keep in memory and send to new clients</param>
+        public LogServer(IPAddress address, int port, string greetingMessage, int logSize)
+        {
+            if (address == null) throw new ArgumentNullException(nameof(address));
+            if (port < IPEndPoint.MinPort || port > IPEndPoint.MaxPort)
+            {
+                throw new ArgumentOutOfRangeException(nameof(port), port, "The port must be from 0 to 65535.");
+            }
+            if (logSize < 0) throw new ArgumentOutOfRangeException(nameof(logSize), logSize, "The log size cannot be negative.");
+
+            this.listener = new TcpListener(address, port);
+            this.greeting = greetingMessage ?? throw new ArgumentNullException(nameof(greetingMessage));
             this.maxLogSize = logSize;
         }
 
         /// <summary>
-        /// Start the Log Server. When this returns, the server is already accepting connections.
-        /// If the port cannot be opened, <see cref="onServerException"/> is raised before this returns,
-        /// and <see cref="Active"/> stays false.
+        /// The most clients that can be connected at once. Further connections are told the server is full and
+        /// closed. The default is <see cref="DefaultMaxClients"/>.
         /// </summary>
-        public void Start()
+        public int MaxClients
         {
-            // Open the port here rather than on the server thread, so a client that connects
-            // straight after Start() is never refused, and Active is never true for a server
-            // that could not open its port
-            try
+            get { return maxClients; }
+            set
             {
-                this.tcp_server.Start();
+                if (value < 1) throw new ArgumentOutOfRangeException(nameof(value), value, "At least one client must be allowed.");
+                maxClients = value;
             }
-            catch (Exception ex)
-            {
-                if (this.onServerException != null)
-                {
-                    this.onServerException(ex);
-                }
-                return;
-            }
-
-            // Set this before the thread starts, so a Stop() straight after Start() is not undone by the new thread
-            this.running = true;
-            this.server_thread.Start();
         }
 
         /// <summary>
-        /// Stop the Log Server
+        /// The most lines queued for one client that is not keeping up. When a client's queue is full its oldest
+        /// lines are dropped, and it is told how many it missed, so a client that stops reading cannot make the
+        /// server's memory grow without bound. The default is <see cref="DefaultMaxQueuedLines"/>.
         /// </summary>
-        public void Stop()
+        public int MaxQueuedLines
         {
-            this.running = false;
+            get { return maxQueuedLines; }
+            set
+            {
+                if (value < 1) throw new ArgumentOutOfRangeException(nameof(value), value, "At least one line must be allowed.");
+                maxQueuedLines = value;
+            }
         }
 
         /// <summary>
-        /// Join the Log Server and wait for it to shutdown
+        /// The address and port the server is listening on, once <see cref="Start"/> has opened it; useful with port 0
         /// </summary>
-        public void Join()
-        {
-            // The thread never started if Start() was not called or could not open the port
-            if ((this.server_thread.ThreadState & ThreadState.Unstarted) != 0)
-            {
-                return;
-            }
-
-            this.server_thread.Join();
-        }
+        public IPEndPoint? LocalEndpoint => localEndpoint;
 
         /// <summary>
         /// Is the Log Server Active
         /// </summary>
-        public bool Active
+        public bool Active => running;
+
+        /// <summary>
+        /// How many clients are connected
+        /// </summary>
+        public int ConnectedClients
         {
-            get { return this.running; }
+            get
+            {
+                lock (logLock)
+                {
+                    return clients.Count;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Start the Log Server. When this returns, the server is already accepting connections.
+        /// If the port cannot be opened, <see cref="ServerError"/> is raised before this returns,
+        /// and <see cref="Active"/> stays false.
+        /// </summary>
+        /// <exception cref="InvalidOperationException">The server was already started; a server can only be started once.</exception>
+        public void Start()
+        {
+            if (Interlocked.Exchange(ref started, 1) == 1)
+            {
+                throw new InvalidOperationException("The log server has already been started. Create a new LogServer to start again.");
+            }
+
+            try
+            {
+                listener.Start();
+            }
+            catch (SocketException ex)
+            {
+                RaiseServerError(ex);
+                return;
+            }
+
+            localEndpoint = (IPEndPoint)listener.LocalEndpoint;
+            running = true;
+            acceptLoop = AcceptLoopAsync();
+        }
+
+        /// <summary>
+        /// Stop the Log Server and disconnect every client. Call <see cref="Join"/> to wait until it has finished.
+        /// </summary>
+        public void Stop()
+        {
+            running = false;
+            // Ends the pending accept, which then closes every client
+            listener.Stop();
+        }
+
+        /// <summary>
+        /// Wait for the Log Server to shut down after <see cref="Stop"/>
+        /// </summary>
+        public void Join()
+        {
+            acceptLoop.GetAwaiter().GetResult();
+        }
+
+        /// <summary>
+        /// Stop the Log Server and wait for it to shut down
+        /// </summary>
+        public void Dispose()
+        {
+            Stop();
+            Join();
         }
 
         /// <summary>
@@ -151,123 +218,145 @@ namespace ScorpioConcepts.Framework.LogServer
         /// <param name="line">Any text to be sent to the Log Client</param>
         public void Log(string line)
         {
+            if (line == null) throw new ArgumentNullException(nameof(line));
+
             lock (logLock)
             {
-                this.logLines.Enqueue(line);
-                if (this.logLines.Count > maxLogSize)
+                logLines.Enqueue(line);
+                while (logLines.Count > maxLogSize)
                 {
-                    this.logLines.Dequeue();
+                    logLines.Dequeue();
                 }
-                this.unsentLines.Enqueue(line);
+                foreach (LogServerClient client in clients)
+                {
+                    client.Send(line);
+                }
             }
         }
 
         /// <summary>
-        /// Returns a copy of the Log History
+        /// Returns a copy of the Log History, oldest line first
         /// </summary>
-        public string[] LogHistory
+        public IReadOnlyList<string> LogHistory
         {
             get
             {
                 lock (logLock)
                 {
-                    return this.logLines.ToArray();
+                    return logLines.ToArray();
                 }
             }
         }
 
-        private void _exec()
+        /// <summary>The number of lines queued for each connected client, for tests</summary>
+        internal int[] QueuedLinesPerClient()
+        {
+            lock (logLock)
+            {
+                return clients.Select(c => c.QueuedLines).ToArray();
+            }
+        }
+
+        [SuppressMessage("Design", "CA1031:Do not catch general exception types",
+            Justification = "Any failure of the accept loop is reported through ServerError, which is this class's documented error channel.")]
+        private async Task AcceptLoopAsync()
         {
             try
             {
-                while (this.running == true)
+                while (running)
                 {
-                    while (this.tcp_server.Pending())
-                    {
-                        TcpClient client = this.tcp_server.AcceptTcpClient();
-
-                        LogServer_Client cl = new LogServer_Client(client);
-                        cl.onThreadEnd += new LogServer_Client.ThreadEnd(cl_onThreadEnd);
-
-                        lock (logLock)
-                        {
-                            // Deliver pending lines to the existing clients first. Otherwise a line logged just
-                            // before this client connected would reach it twice: in the history and again as new.
-                            sendUnsentLines();
-
-                            cl.Send(greeting);
-                            foreach (string line in this.logLines)
-                            {
-                                cl.Send(line);
-                            }
-                            this.clients.Add(cl);
-                        }
-
-                        cl.Start();
-                        if (this.onClientConnect != null)
-                        {
-                            this.onClientConnect(cl.Address);
-                        }
-                    }
-
-                    lock (logLock)
-                    {
-                        sendUnsentLines();
-                    }
-
-                    LogServer_Client disconnected;
-                    while (discon_clients.TryDequeue(out disconnected))
-                    {
-                        clients.Remove(disconnected);
-                    }
-
-                    Thread.Sleep(10);
+                    TcpClient tcp = await listener.AcceptTcpClientAsync().ConfigureAwait(false);
+                    Accept(tcp);
                 }
+            }
+            catch (Exception) when (!running)
+            {
+                // Stop() closed the listener, which ends the pending accept
             }
             catch (Exception ex)
             {
-                if (this.onServerException != null)
-                {
-                    this.onServerException(ex);
-                }
+                running = false;
+                RaiseServerError(ex);
             }
             finally
             {
-                foreach (LogServer_Client cl in this.clients)
-                {
-                    cl.Stop();
-                    cl.Join();
-                }
+                running = false;
+                listener.Stop();
 
-                this.tcp_server.Stop();
-                this.running = false;
+                LogServerClient[] remaining;
+                lock (logLock)
+                {
+                    remaining = clients.ToArray();
+                }
+                foreach (LogServerClient client in remaining)
+                {
+                    client.Close();
+                }
+                await Task.WhenAll(remaining.Select(c => c.Completion)).ConfigureAwait(false);
             }
         }
 
-        /// <summary>
-        /// Queue every unsent line on every client. Must be called while holding logLock.
-        /// </summary>
-        private void sendUnsentLines()
+        private void Accept(TcpClient tcp)
         {
-            foreach (string line in this.unsentLines)
+            LogServerClient? client = null;
+            lock (logLock)
             {
-                foreach (LogServer_Client cl in this.clients)
+                if (running && clients.Count < maxClients)
                 {
-                    cl.Send(line);
+                    client = new LogServerClient(tcp, maxQueuedLines);
+                    client.Send(greeting);
+                    foreach (string line in logLines)
+                    {
+                        client.Send(line);
+                    }
+                    clients.Add(client);
                 }
             }
 
-            this.unsentLines.Clear();
+            if (client == null)
+            {
+                _ = RefuseAsync(tcp);
+                return;
+            }
+
+            ClientConnected?.Invoke(this, new LogClientEventArgs(client.Address));
+            client.Start(OnClientClosed);
         }
 
-        private void cl_onThreadEnd(LogServer_Client sender)
+        private static async Task RefuseAsync(TcpClient tcp)
         {
-            // Runs on the client's thread, so hand the client over to the server thread for removal
-            discon_clients.Enqueue(sender);
-            if (this.onClientDisconnect != null)
+            try
             {
-                this.onClientDisconnect(sender.Address);
+                NetworkStream stream = tcp.GetStream();
+                await stream.WriteAsync(TooManyClientsMessage, 0, TooManyClientsMessage.Length).ConfigureAwait(false);
             }
+            catch (Exception ex) when (ex is IOException || ex is SocketException || ex is ObjectDisposedException)
+            {
+                // The client went away first; nothing to tell it
+            }
+            finally
+            {
+                tcp.Dispose();
+            }
+        }
+
+        private void OnClientClosed(LogServerClient client)
+        {
+            bool removed;
+            lock (logLock)
+            {
+                removed = clients.Remove(client);
+            }
+
+            if (removed)
+            {
+                ClientDisconnected?.Invoke(this, new LogClientEventArgs(client.Address));
+            }
+        }
+
+        private void RaiseServerError(Exception ex)
+        {
+            ServerError?.Invoke(this, new LogServerErrorEventArgs(ex));
         }
     }
 }
