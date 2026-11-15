@@ -95,7 +95,7 @@ namespace ScorpioConcepts.Framework.DBSchema
         /// Convert a Database Schema file to another format, for example to move an existing XML schema to JSON.
         /// No database connection is needed.
         /// </summary>
-        /// <param name="sourceFile">The schema file to read, in either format</param>
+        /// <param name="sourceFile">The schema file to read, in any supported format</param>
         /// <param name="targetFile">The schema file to write</param>
         /// <param name="targetFormat">The format to write</param>
         public static void ConvertSchema(string sourceFile, string targetFile, DBSchemaFormat targetFormat)
@@ -117,9 +117,9 @@ namespace ScorpioConcepts.Framework.DBSchema
 
         /// <summary>
         /// Compare the actual Database Schema with the Schema stored in a schema file, and fix any problems.
-        /// The file can be JSON or XML; the format is detected from its content.
+        /// The file can be JSON, XML or DBML; the format is detected from its content.
         /// </summary>
-        /// <param name="schemaFile">Filename of the JSON or XML file that contains the Schema to check against</param>
+        /// <param name="schemaFile">Filename of the JSON, XML or DBML file that contains the Schema to check against</param>
         public static void CheckDatabaseSchema(string schemaFile)
         {
             CheckDatabaseSchema(schemaFile, DetectFormat(schemaFile));
@@ -356,34 +356,76 @@ namespace ScorpioConcepts.Framework.DBSchema
         }
 
         /// <summary>
-        /// Work out whether a schema file is JSON or XML from its first non-whitespace character
+        /// Work out whether a schema file is JSON, XML or DBML from how its content starts, after any
+        /// whitespace and // or /* */ comments (both JSON and DBML files can start with a comment)
         /// </summary>
         internal static DBSchemaFormat DetectFormat(string schemaFile)
         {
+            string text;
             // StreamReader skips a byte order mark, so the first character read is real content
             using (StreamReader reader = new StreamReader(schemaFile, Encoding.UTF8, true))
             {
-                int c;
-                while ((c = reader.Read()) != -1)
+                text = reader.ReadToEnd();
+            }
+
+            int i = 0;
+            while (i < text.Length)
+            {
+                if (char.IsWhiteSpace(text[i]))
                 {
-                    if (char.IsWhiteSpace((char)c))
-                    {
-                        continue;
-                    }
-                    if (c == '{')
-                    {
-                        return DBSchemaFormat.Json;
-                    }
-                    if (c == '<')
-                    {
-                        return DBSchemaFormat.Xml;
-                    }
+                    i++;
+                }
+                else if (string.CompareOrdinal(text, i, "//", 0, 2) == 0)
+                {
+                    int end = text.IndexOf('\n', i);
+                    i = (end == -1) ? text.Length : end + 1;
+                }
+                else if (string.CompareOrdinal(text, i, "/*", 0, 2) == 0)
+                {
+                    int end = text.IndexOf("*/", i + 2, StringComparison.Ordinal);
+                    i = (end == -1) ? text.Length : end + 2;
+                }
+                else
+                {
                     break;
                 }
             }
 
-            throw new FormatException("'" + schemaFile + "' is not a JSON or XML schema file");
+            if (i < text.Length)
+            {
+                if (text[i] == '{')
+                {
+                    return DBSchemaFormat.Json;
+                }
+                if (text[i] == '<')
+                {
+                    return DBSchemaFormat.Xml;
+                }
+                if ((i == 0) && text.StartsWith("---", StringComparison.Ordinal))
+                {
+                    // DBML front matter
+                    return DBSchemaFormat.Dbml;
+                }
+
+                int wordEnd = i;
+                while ((wordEnd < text.Length) && char.IsLetter(text[wordEnd]))
+                {
+                    wordEnd++;
+                }
+                if (Array.IndexOf(DbmlKeywords, text.Substring(i, wordEnd - i).ToLowerInvariant()) >= 0)
+                {
+                    return DBSchemaFormat.Dbml;
+                }
+            }
+
+            throw new FormatException("'" + schemaFile + "' is not a JSON, XML or DBML schema file");
         }
+
+        /// <summary>The words a DBML file can start with</summary>
+        private static readonly string[] DbmlKeywords =
+        {
+            "table", "ref", "records", "project", "note", "tablegroup", "tablepartial", "enum", "diagramview", "metadata", "use", "reuse",
+        };
 
         internal static DBSchema ReadSchemaFile(string schemaFile, DBSchemaFormat format)
         {
@@ -393,6 +435,8 @@ namespace ScorpioConcepts.Framework.DBSchema
                     return DBSchemaJson.Read(schemaFile);
                 case DBSchemaFormat.Xml:
                     return DBSchemaXml.Read(schemaFile);
+                case DBSchemaFormat.Dbml:
+                    return DBSchemaDbml.Read(schemaFile);
                 default:
                     throw new ArgumentOutOfRangeException("format", format, "Unknown schema format");
             }
@@ -408,6 +452,9 @@ namespace ScorpioConcepts.Framework.DBSchema
                     break;
                 case DBSchemaFormat.Xml:
                     DBSchemaXml.Write(schema, targetFile, defaultRecords);
+                    break;
+                case DBSchemaFormat.Dbml:
+                    DBSchemaDbml.Write(schema, targetFile, defaultRecords);
                     break;
                 default:
                     throw new ArgumentOutOfRangeException("format", format, "Unknown schema format");

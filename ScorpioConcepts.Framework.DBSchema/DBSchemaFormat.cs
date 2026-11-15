@@ -12,6 +12,10 @@ namespace ScorpioConcepts.Framework.DBSchema
         /// <summary>
         /// The original XML format, still fully supported for existing schema files
         /// </summary>
-        Xml
+        Xml,
+        /// <summary>
+        /// DBML, the database markup language used by dbdiagram.io (https://dbml.dbdiagram.io)
+        /// </summary>
+        Dbml
     }
 }

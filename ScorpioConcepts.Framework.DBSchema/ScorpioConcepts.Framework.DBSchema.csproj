@@ -6,7 +6,7 @@
     <PackageId>ScorpioConcepts.Framework.DBSchema</PackageId>
     <Version>2.0.0</Version>
     <Title>Scorpio Concepts Database Schema</Title>
-    <Description>Keeps a SQL Server database structure in sync with a schema defined in a JSON or XML file</Description>
+    <Description>Keeps a SQL Server database structure in sync with a schema defined in a JSON, DBML or XML file</Description>
     <Authors>Scorpio Concepts</Authors>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageRequireLicenseAcceptance>False</PackageRequireLicenseAcceptance>

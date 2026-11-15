@@ -34,6 +34,13 @@ public sealed class SchemaFormatTests : IDisposable
     [InlineData("<tables></tables>", DBSchemaFormat.Xml)]
     [InlineData("""<?xml version="1.0" encoding="utf-8"?><tables />""", DBSchemaFormat.Xml)]
     [InlineData("\n\n  <tables />", DBSchemaFormat.Xml)]
+    [InlineData("// JSON files may start with a comment\n{}", DBSchemaFormat.Json)]
+    [InlineData("/* so may */ { \"tables\": [] }", DBSchemaFormat.Json)]
+    [InlineData("Table A {\n  Id int\n}", DBSchemaFormat.Dbml)]
+    [InlineData("  table A {}", DBSchemaFormat.Dbml)]
+    [InlineData("// Shop schema\n/* v2 */\nRef: A.b > C.d", DBSchemaFormat.Dbml)]
+    [InlineData("Project shop {}", DBSchemaFormat.Dbml)]
+    [InlineData("---\ntitle: Shop\n---\nTable A {}", DBSchemaFormat.Dbml)]
     public void Detects_format_from_content(string content, DBSchemaFormat expected)
     {
         DBSchema.DetectFormat(WriteFile(content)).ShouldBe(expected);
@@ -57,6 +64,8 @@ public sealed class SchemaFormatTests : IDisposable
     [InlineData("")]
     [InlineData("   ")]
     [InlineData("tables: []")]
+    [InlineData("// only a comment")]
+    [InlineData("Tables A {}")]
     public void Rejects_files_that_are_neither_format(string content)
     {
         string path = WriteFile(content);
@@ -117,6 +126,45 @@ public sealed class SchemaFormatTests : IDisposable
         // XML cannot hold null, so the null column is left out of the record
         converted.Tables["Orders"].DefaultRecords.ShouldHaveSingleItem().Values
             .ShouldBe(new Dictionary<string, object> { ["Id"] = "1" });
+    }
+
+    [Fact]
+    public void ConvertSchema_turns_json_into_dbml_and_back()
+    {
+        string json = WriteFile("""
+            {
+              "tables": [
+                {
+                  "name": "Customers",
+                  "columns": [
+                    { "name": "Id", "dataType": "int identity", "options": "NOT NULL" },
+                    { "name": "Name", "dataType": "nvarchar(50)", "options": "NOT NULL DEFAULT ('')" }
+                  ],
+                  "primaryKey": { "name": "PK_Customers", "columns": [ "Id" ] },
+                  "indexes": [ { "name": "IX_Customers_Name", "unique": true, "columns": [ "Name" ] } ],
+                  "defaultRecords": [ { "Id": 1, "Name": "Walk-in" } ]
+                },
+                {
+                  "name": "Orders",
+                  "columns": [ { "name": "Id", "dataType": "int", "options": "NOT NULL" }, { "name": "CustomerId", "dataType": "int", "options": "NULL" } ],
+                  "foreignKeys": [ { "name": "FK_Orders_Customers", "column": "CustomerId", "referencedTable": "Customers", "referencedColumn": "Id" } ]
+                }
+              ]
+            }
+            """, extension: ".json");
+        string dbml = TempFile(".dbml");
+        string back = TempFile(".json");
+
+        DBSchema.ConvertSchema(json, dbml, DBSchemaFormat.Dbml);
+        DBSchema.ConvertSchema(dbml, back, DBSchemaFormat.Json);
+
+        DBSchema.DetectFormat(dbml).ShouldBe(DBSchemaFormat.Dbml);
+        var original = DBSchemaJson.Read(json);
+        SchemaAssert.SameStructure(DBSchemaDbml.Read(dbml), original);
+        var roundTripped = DBSchemaJson.Read(back);
+        SchemaAssert.SameStructure(roundTripped, original);
+        roundTripped.Tables["Customers"].DefaultRecords.ShouldHaveSingleItem().Values
+            .ShouldBe(new Dictionary<string, object> { ["Id"] = 1, ["Name"] = "Walk-in" });
     }
 
     [Fact]
