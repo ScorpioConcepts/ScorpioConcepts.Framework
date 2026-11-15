@@ -1,9 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text;
 using Microsoft.Data.SqlClient;
-using System.Xml;
 
 namespace ScorpioConcepts.Framework.DBSchema
 {
@@ -37,146 +37,106 @@ namespace ScorpioConcepts.Framework.DBSchema
         }
 
         /// <summary>
-        /// Generate a Database Schema XML file from the database
+        /// Generate a Database Schema JSON file from the database
         /// </summary>
-        /// <param name="targetFile">Filename of file to store Database Schema XML</param>
-        public static void GenerateSchemaXML(string targetFile)
+        /// <param name="targetFile">Filename of file to store the Database Schema in</param>
+        public static void GenerateSchema(string targetFile)
         {
-            GenerateSchemaXML(targetFile, new DBDefaultRecords());
+            GenerateSchema(targetFile, new DBDefaultRecords(), DBSchemaFormat.Json);
         }
 
         /// <summary>
-        /// Generate a Database Schema XML file from the database, along with the given default records
+        /// Generate a Database Schema JSON file from the database, along with the given default records
         /// </summary>
-        /// <param name="targetFile">Filename of file to store Database Schema XML</param>
-        /// <param name="defaultRecords">List of default records to include in Database Schema XML</param>
-        public static void GenerateSchemaXML(string targetFile, DBDefaultRecords defaultRecords)
+        /// <param name="targetFile">Filename of file to store the Database Schema in</param>
+        /// <param name="defaultRecords">List of default records to include in the Database Schema</param>
+        public static void GenerateSchema(string targetFile, DBDefaultRecords defaultRecords)
+        {
+            GenerateSchema(targetFile, defaultRecords, DBSchemaFormat.Json);
+        }
+
+        /// <summary>
+        /// Generate a Database Schema file in the given format from the database, along with the given default records
+        /// </summary>
+        /// <param name="targetFile">Filename of file to store the Database Schema in</param>
+        /// <param name="defaultRecords">List of default records to include in the Database Schema</param>
+        /// <param name="format">The file format to write</param>
+        public static void GenerateSchema(string targetFile, DBDefaultRecords defaultRecords, DBSchemaFormat format)
         {
             DebugLog.Clear();
 
             DBSchema dbSchema = populateDBSchema();
 
-            WriteSchemaXML(dbSchema, targetFile, defaultRecords);
+            WriteSchemaFile(dbSchema, targetFile, defaultRecords, format);
         }
 
         /// <summary>
-        /// Write the given Database Schema, along with the given default records, to an XML file
+        /// Generate a Database Schema XML file from the database
         /// </summary>
-        internal static void WriteSchemaXML(DBSchema dbSchema, string targetFile, DBDefaultRecords defaultRecords)
+        /// <remarks>New schemas should use <see cref="GenerateSchema(string)"/>, which writes JSON.</remarks>
+        /// <param name="targetFile">Filename of file to store Database Schema XML</param>
+        public static void GenerateSchemaXML(string targetFile)
         {
-            XmlWriterSettings settings = new XmlWriterSettings();
-            settings.Indent = true;
-            settings.NewLineChars = Environment.NewLine;
-            settings.NewLineHandling = NewLineHandling.Entitize;
-            settings.NewLineOnAttributes = false;
-
-            DebugLog.Add("Creating DBSchema XML file '" + targetFile + "'...");
-            // Dispose the writer even when writing fails, so the file is not left locked
-            using (XmlWriter writer = XmlWriter.Create(targetFile, settings))
-            {
-                DebugLog.Add("Found " + dbSchema.Tables.Count.ToString() + " Tables...");
-
-                writer.WriteStartElement("tables");
-                foreach (DBTable table in dbSchema.Tables.Values)
-                {
-                    string tableName = table.Name;
-
-                    DebugLog.Add("DBSchema XML for table '" + tableName + "'...");
-                    writer.WriteStartElement("table");
-                    writer.WriteAttributeString("name", tableName);
-
-                    foreach( DBTable.Column column in table.Columns)
-                    {
-                        writer.WriteStartElement("column");
-                        writer.WriteAttributeString("name", column.Name);
-                        writer.WriteAttributeString("datatype", column.DataType);
-                        writer.WriteAttributeString("options", column.Options);
-                        writer.WriteEndElement();
-                    }
-
-                    if( table.PrimaryKey.KeyColumns.Count > 0 )
-                    {
-                        writer.WriteStartElement("primary_key");
-                        writer.WriteAttributeString("name", table.PrimaryKey.Name);
-                        foreach (string keyColumn in table.PrimaryKey.KeyColumns)
-                        {
-                            writer.WriteStartElement("column");
-                            writer.WriteAttributeString("name", keyColumn);
-                            writer.WriteEndElement();
-                        }
-                        writer.WriteEndElement();
-                    }
-
-                    foreach (DBTable.Index idx in table.Indexes)
-                    {
-                        writer.WriteStartElement("index");
-                        writer.WriteAttributeString("name", idx.Name);
-                        writer.WriteAttributeString("clustered", idx.Clustered.ToString());
-                        writer.WriteAttributeString("unique", idx.Unique.ToString());
-                        foreach (KeyValuePair<string,bool> column in idx.Columns)
-                        {
-                            writer.WriteStartElement("column");
-                            writer.WriteAttributeString("name", column.Key);
-                            writer.WriteAttributeString("desc", column.Value.ToString());
-                            writer.WriteEndElement();
-                        }
-                        writer.WriteEndElement();
-                    }
-
-                    foreach( DBTable.ForeignKey fkey in table.ForeignKeys)
-                    {
-                        writer.WriteStartElement("foreign_key");
-                        writer.WriteAttributeString("name", fkey.Name);
-                        writer.WriteAttributeString("column", fkey.Column);
-                        writer.WriteAttributeString("pk_table", fkey.PKeyTable);
-                        writer.WriteAttributeString("pk_column", fkey.PKeyColumn);
-                        writer.WriteEndElement();
-                    }
-
-                    if (defaultRecords.ContainsKey(tableName))
-                    {
-                        DebugLog.Add("Saving Default Records for table '" + tableName + "'...");
-                        List<DBDefaultRecord> tableDefaultRecords = defaultRecords[tableName];
-                        foreach (DBDefaultRecord record in tableDefaultRecords)
-                        {
-                            writer.WriteStartElement("default_record");
-                            foreach (KeyValuePair<string, object> kvp in record.Values)
-                            {
-                                writer.WriteStartElement("columnValue");
-                                writer.WriteAttributeString("column", kvp.Key);
-                                if (kvp.Value.GetType() == typeof(string))
-                                {
-                                    writer.WriteCData(kvp.Value.ToString());
-                                }
-                                else
-                                {
-                                    writer.WriteValue(kvp.Value);
-                                }
-                                writer.WriteEndElement();
-                            }
-                            writer.WriteEndElement();
-                        }
-                    }
-
-                    writer.WriteEndElement();
-                    DebugLog.Add("DB Schema XML generated for table '" + tableName + "'");
-                }
-
-                writer.WriteEndElement();
-            }
+            GenerateSchema(targetFile, new DBDefaultRecords(), DBSchemaFormat.Xml);
         }
 
         /// <summary>
-        /// Compare the actual Database Schema with the Schema stored in the XML file, and fix any problems
+        /// Generate a Database Schema XML file from the database, along with the given default records
         /// </summary>
-        /// <param name="schemaXMLFile">Filename of the XML file that contains the Schema to check against</param>
-        public static void CheckDatabaseSchema(string schemaXMLFile)
+        /// <remarks>New schemas should use <see cref="GenerateSchema(string, DBDefaultRecords)"/>, which writes JSON.</remarks>
+        /// <param name="targetFile">Filename of file to store Database Schema XML</param>
+        /// <param name="defaultRecords">List of default records to include in Database Schema XML</param>
+        public static void GenerateSchemaXML(string targetFile, DBDefaultRecords defaultRecords)
+        {
+            GenerateSchema(targetFile, defaultRecords, DBSchemaFormat.Xml);
+        }
+
+        /// <summary>
+        /// Convert a Database Schema file to another format, for example to move an existing XML schema to JSON.
+        /// No database connection is needed.
+        /// </summary>
+        /// <param name="sourceFile">The schema file to read, in either format</param>
+        /// <param name="targetFile">The schema file to write</param>
+        /// <param name="targetFormat">The format to write</param>
+        public static void ConvertSchema(string sourceFile, string targetFile, DBSchemaFormat targetFormat)
+        {
+            DBSchema schema = ReadSchemaFile(sourceFile, DetectFormat(sourceFile));
+
+            // The default records were read into the tables; the writers take them separately
+            DBDefaultRecords defaultRecords = new DBDefaultRecords();
+            foreach (DBTable table in schema.Tables.Values)
+            {
+                if (table.DefaultRecords.Count > 0)
+                {
+                    defaultRecords.Add(table.Name, table.DefaultRecords);
+                }
+            }
+
+            WriteSchemaFile(schema, targetFile, defaultRecords, targetFormat);
+        }
+
+        /// <summary>
+        /// Compare the actual Database Schema with the Schema stored in a schema file, and fix any problems.
+        /// The file can be JSON or XML; the format is detected from its content.
+        /// </summary>
+        /// <param name="schemaFile">Filename of the JSON or XML file that contains the Schema to check against</param>
+        public static void CheckDatabaseSchema(string schemaFile)
+        {
+            CheckDatabaseSchema(schemaFile, DetectFormat(schemaFile));
+        }
+
+        /// <summary>
+        /// Compare the actual Database Schema with the Schema stored in a schema file of the given format, and fix any problems
+        /// </summary>
+        /// <param name="schemaFile">Filename of the file that contains the Schema to check against</param>
+        /// <param name="format">The format of the schema file</param>
+        public static void CheckDatabaseSchema(string schemaFile, DBSchemaFormat format)
         {
             DebugLog.Clear();
 
-            // Step 1: Get the Schema as specified in XML
-            DebugLog.Add("Getting DBSchema as per XML file...");
-            DBSchema xmlSchema = populateXMLSchema(schemaXMLFile);
+            // Step 1: Get the Schema as specified in the schema file
+            DebugLog.Add("Getting DBSchema as per " + format.ToString().ToUpperInvariant() + " file...");
+            DBSchema fileSchema = ReadSchemaFile(schemaFile, format);
 
             // Step 2: Get the Schema as it is currently in the database
             DebugLog.Add("Getting DBSchema as per database...");
@@ -184,12 +144,12 @@ namespace ScorpioConcepts.Framework.DBSchema
 
             // Step 3: Create any missing tables
             List<string> createdTables = new List<string>();
-            foreach (string tableName in xmlSchema.Tables.Keys)
+            foreach (string tableName in fileSchema.Tables.Keys)
             {
                 if (dbSchema.Tables.ContainsKey(tableName) == false)
                 {
                     DebugLog.Add("Table '" + tableName + "' not found in database!!");
-                    CreateDBTable(xmlSchema.Tables[tableName]);
+                    CreateDBTable(fileSchema.Tables[tableName]);
 
                     createdTables.Add(tableName);
                 }
@@ -202,40 +162,40 @@ namespace ScorpioConcepts.Framework.DBSchema
             }
 
             // Step 4: Check all columns exist and all indexes exist
-            foreach (DBTable xmlTable in xmlSchema.Tables.Values)
+            foreach (DBTable fileTable in fileSchema.Tables.Values)
             {
-                DBTable dbTable = dbSchema.Tables[xmlTable.Name];
+                DBTable dbTable = dbSchema.Tables[fileTable.Name];
 
-                foreach (DBTable.Column xmlColumn in xmlTable.Columns)
+                foreach (DBTable.Column fileColumn in fileTable.Columns)
                 {
-                    if (dbTable.FindColumn(xmlColumn.Name) == null)
+                    if (dbTable.FindColumn(fileColumn.Name) == null)
                     {
-                        DebugLog.Add("Table '" + xmlTable.Name + "' does not have column '" + xmlColumn.Name + "'!!");
-                        CreateDBColumn(dbTable, xmlColumn);
+                        DebugLog.Add("Table '" + fileTable.Name + "' does not have column '" + fileColumn.Name + "'!!");
+                        CreateDBColumn(dbTable, fileColumn);
                     }
                 }
 
-                foreach (DBTable.Index xmlIndex in xmlTable.Indexes)
+                foreach (DBTable.Index fileIndex in fileTable.Indexes)
                 {
-                    if (dbTable.FindIndex(xmlIndex.Name) == null)
+                    if (dbTable.FindIndex(fileIndex.Name) == null)
                     {
-                        DebugLog.Add("Table '" + xmlTable.Name + "' does not have index '" + xmlIndex.Name + "'!!");
-                        CreateDBIndex(dbTable, xmlIndex);
+                        DebugLog.Add("Table '" + fileTable.Name + "' does not have index '" + fileIndex.Name + "'!!");
+                        CreateDBIndex(dbTable, fileIndex);
                     }
                 }
             }
 
             // Step 5: Check that all foreign keys exist
-            foreach (DBTable xmlTable in xmlSchema.Tables.Values)
+            foreach (DBTable fileTable in fileSchema.Tables.Values)
             {
-                DBTable dbTable = dbSchema.Tables[xmlTable.Name];
+                DBTable dbTable = dbSchema.Tables[fileTable.Name];
 
-                foreach (DBTable.ForeignKey xmlFKey in xmlTable.ForeignKeys)
+                foreach (DBTable.ForeignKey fileFKey in fileTable.ForeignKeys)
                 {
-                    if (dbTable.FindForeignKey(xmlFKey.Name) == null)
+                    if (dbTable.FindForeignKey(fileFKey.Name) == null)
                     {
-                        DebugLog.Add("Table '" + xmlTable.Name + "' does not have foreign key '" + xmlFKey.Name + "'!!");
-                        CreateDBForeignKey(dbTable, xmlFKey);
+                        DebugLog.Add("Table '" + fileTable.Name + "' does not have foreign key '" + fileFKey.Name + "'!!");
+                        CreateDBForeignKey(dbTable, fileFKey);
                     }
                 }
             }
@@ -396,6 +356,65 @@ namespace ScorpioConcepts.Framework.DBSchema
         }
 
         /// <summary>
+        /// Work out whether a schema file is JSON or XML from its first non-whitespace character
+        /// </summary>
+        internal static DBSchemaFormat DetectFormat(string schemaFile)
+        {
+            // StreamReader skips a byte order mark, so the first character read is real content
+            using (StreamReader reader = new StreamReader(schemaFile, Encoding.UTF8, true))
+            {
+                int c;
+                while ((c = reader.Read()) != -1)
+                {
+                    if (char.IsWhiteSpace((char)c))
+                    {
+                        continue;
+                    }
+                    if (c == '{')
+                    {
+                        return DBSchemaFormat.Json;
+                    }
+                    if (c == '<')
+                    {
+                        return DBSchemaFormat.Xml;
+                    }
+                    break;
+                }
+            }
+
+            throw new FormatException("'" + schemaFile + "' is not a JSON or XML schema file");
+        }
+
+        internal static DBSchema ReadSchemaFile(string schemaFile, DBSchemaFormat format)
+        {
+            switch (format)
+            {
+                case DBSchemaFormat.Json:
+                    return DBSchemaJson.Read(schemaFile);
+                case DBSchemaFormat.Xml:
+                    return DBSchemaXml.Read(schemaFile);
+                default:
+                    throw new ArgumentOutOfRangeException("format", format, "Unknown schema format");
+            }
+        }
+
+        internal static void WriteSchemaFile(DBSchema schema, string targetFile, DBDefaultRecords defaultRecords, DBSchemaFormat format)
+        {
+            DebugLog.Add("Creating DBSchema " + format.ToString().ToUpperInvariant() + " file '" + targetFile + "'...");
+            switch (format)
+            {
+                case DBSchemaFormat.Json:
+                    DBSchemaJson.Write(schema, targetFile, defaultRecords);
+                    break;
+                case DBSchemaFormat.Xml:
+                    DBSchemaXml.Write(schema, targetFile, defaultRecords);
+                    break;
+                default:
+                    throw new ArgumentOutOfRangeException("format", format, "Unknown schema format");
+            }
+        }
+
+        /// <summary>
         /// Build a column data type, including its size, the way it would be written in a CREATE TABLE statement
         /// </summary>
         /// <param name="typeName">Type name from sys.types</param>
@@ -442,161 +461,6 @@ namespace ScorpioConcepts.Framework.DBSchema
             }
 
             return dataType;
-        }
-
-        internal static DBSchema populateXMLSchema(string schemaXMLFile)
-        {
-            DBSchema xmlSchema = new DBSchema();
-
-            XmlReaderSettings settings = new XmlReaderSettings();
-            settings.IgnoreWhitespace = true;
-
-            // Dispose the reader even when parsing fails, so the file is not left locked
-            using (XmlReader reader = XmlReader.Create(schemaXMLFile, settings))
-            {
-                reader.MoveToContent();
-                if (reader.IsEmptyElement)
-                {
-                    // <tables />
-                    reader.ReadStartElement("tables");
-                    return xmlSchema;
-                }
-
-                reader.ReadStartElement("tables");
-                while (reader.NodeType == XmlNodeType.Element)
-                {
-                    if (reader.Name != "table")
-                    {
-                        // Unknown elements are ignored, so newer files can still be read
-                        reader.Skip();
-                        continue;
-                    }
-
-                    DBTable table = xmlSchema.AddTable(reader.GetAttribute("name"));
-                    if (reader.IsEmptyElement)
-                    {
-                        // <table name="..." /> has no children to read
-                        reader.Read();
-                        continue;
-                    }
-
-                    reader.ReadStartElement();
-                    while (reader.NodeType == XmlNodeType.Element)
-                    {
-                        switch (reader.Name)
-                        {
-                            case "column":
-                                populateXMLColumn(reader, table);
-                                break;
-                            case "primary_key":
-                                populateXMLPrimaryKey(reader, table);
-                                break;
-                            case "index":
-                                populateXMLIndex(reader, table);
-                                break;
-                            case "foreign_key":
-                                populateXMLForeignKey(reader, table);
-                                break;
-                            case "default_record":
-                                populateXMLDefaultRecord(reader, table);
-                                break;
-                            default:
-                                // Without this an unknown element was never consumed and the loop never ended
-                                reader.Skip();
-                                break;
-                        }
-                    }
-                    reader.ReadEndElement();
-                }
-                reader.ReadEndElement();
-            }
-
-            return xmlSchema;
-        }
-
-        private static void populateXMLDefaultRecord(XmlReader reader, DBTable table)
-        {
-            reader.ReadStartElement();
-            DBDefaultRecord rec = table.AddDefaultRecord();
-
-            while ((reader.NodeType == XmlNodeType.Element) && (reader.Name == "columnValue"))
-            {
-                String recColumnName = reader.GetAttribute("column");
-                reader.ReadStartElement();
-                object recData = reader.ReadContentAsObject();
-                rec.AddValue(recColumnName, recData);
-
-                if ((reader.NodeType == XmlNodeType.EndElement) && (reader.Name == "columnValue"))
-                {
-                    reader.ReadEndElement();
-                }
-            }
-            reader.ReadEndElement();
-        }
-        private static void populateXMLIndex(XmlReader reader, DBTable table)
-        {
-            string idxName = reader.GetAttribute("name");
-            bool idxClustered = Boolean.Parse(reader.GetAttribute("clustered").ToString());
-            bool idxUnique = Boolean.Parse(reader.GetAttribute("unique").ToString());
-            reader.ReadStartElement();
-
-            DBTable.Index idx = table.AddIndex(idxName, idxClustered, idxUnique);
-
-            while ((reader.NodeType == XmlNodeType.Element) && (reader.Name == "column"))
-            {
-                String idxColumnName = reader.GetAttribute("name");
-                bool idxColumnDesc = Boolean.Parse(reader.GetAttribute("desc").ToString());
-                idx.AddIndexColumn(idxColumnName, idxColumnDesc);
-                reader.ReadStartElement();
-                if ((reader.NodeType == XmlNodeType.EndElement) && (reader.Name == "column"))
-                {
-                    reader.ReadEndElement();
-                }
-            }
-            reader.ReadEndElement();
-        }
-        private static void populateXMLForeignKey(XmlReader reader, DBTable table)
-        {
-            string fkeyName = reader.GetAttribute("name");
-            string fkeyColumn = reader.GetAttribute("column");
-            string fkeyPKeyTable = reader.GetAttribute("pk_table");
-            string fkeyPKeyColumn = reader.GetAttribute("pk_column");
-            table.AddForeignKey(fkeyName, fkeyColumn, fkeyPKeyTable, fkeyPKeyColumn);
-
-            reader.ReadStartElement();
-            if ((reader.NodeType == XmlNodeType.EndElement) && (reader.Name == "foreign_key"))
-            {
-                reader.ReadEndElement();
-            }
-        }
-        private static void populateXMLPrimaryKey(XmlReader reader, DBTable table)
-        {
-            table.PrimaryKey.Name = reader.GetAttribute("name");
-            reader.ReadStartElement();
-            while ((reader.NodeType == XmlNodeType.Element) && (reader.Name == "column"))
-            {
-                String pkeyColumnName = reader.GetAttribute("name");
-                table.PrimaryKey.AddKeyColumn(pkeyColumnName);
-                reader.ReadStartElement();
-                if ((reader.NodeType == XmlNodeType.EndElement) && (reader.Name == "column"))
-                {
-                    reader.ReadEndElement();
-                }
-            }
-            reader.ReadEndElement();
-        }
-        private static void populateXMLColumn(XmlReader reader, DBTable table)
-        {
-            string columnName = reader.GetAttribute("name");
-            string columnDataType = reader.GetAttribute("datatype");
-            string columnOptions = reader.GetAttribute("options");
-            table.AddColumn(columnName, columnDataType, columnOptions);
-
-            reader.ReadStartElement();
-            if ((reader.NodeType == XmlNodeType.EndElement) && (reader.Name == "column"))
-            {
-                reader.ReadEndElement();
-            }
         }
 
         private static void CreateDBTable(DBTable table)
