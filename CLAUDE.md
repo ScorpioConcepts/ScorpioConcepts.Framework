@@ -16,7 +16,14 @@ dotnet build ScorpioConcepts.Framework.LogServer
 dotnet pack  ScorpioConcepts.Framework.slnx -c Release
 ```
 
-Package metadata lives in each csproj (there are no `.nuspec` or `AssemblyInfo.cs` files). When releasing, bump both `<Version>` and `<PackageVersion>` and update `<PackageReleaseNotes>`. Every change must still compile for `netstandard2.0`, so avoid APIs that only exist in newer .NET, and C# features that need runtime support netstandard2.0 lacks.
+Shared settings for the four libraries live in the root `Directory.Build.props`:
+- target frameworks and package metadata
+- symbol packages (`.snupkg`) and package validation
+- the analyzer level
+- each folder's `README.md` as the package README
+- in CI only, deterministic builds and warnings as errors
+
+Each library csproj holds only `PackageId`, `Version`, `Title`, `Description`, `PackageReleaseNotes` and its dependencies. When releasing, bump `<Version>` and update `<PackageReleaseNotes>`. A library csproj that still sets `<AnalysisLevel>latest</AnalysisLevel>` hasn't had its analyzer warnings fixed yet; remove that line when you clean it up. Every change must still compile for `netstandard2.0`, so avoid APIs that only exist in newer .NET, and C# features that need runtime support netstandard2.0 lacks.
 
 DBSchema uses `Microsoft.Data.SqlClient`, with a different version per target: 7.x for `net10.0` and 5.2.x for `netstandard2.0`, because 6.0 and later no longer ship a .NET Standard build. Keep the conditional `PackageReference` groups in its csproj when updating them.
 
@@ -39,7 +46,8 @@ dotnet test --project tests/ScorpioConcepts.Framework.LogServer.Tests --filter-m
 ## CI and publishing
 
 - `.github/workflows/ci.yml` runs on every PR and push to `master`: build, all tests (TRX results uploaded), and pack (packages uploaded as an artifact). Its `Build and test` job is the required check on `master`. It runs on Ubuntu, because the DBSchema integration tests need Docker, and sets `DBSCHEMA_REQUIRE_DOCKER=true` so they fail rather than skip if Docker is missing.
-- `.github/workflows/publish.yml` runs when a GitHub Release is published. It builds, tests and packs every library, then pushes to NuGet.org with `--skip-duplicate`, so only libraries whose `<Version>` was bumped get published. To release a library, bump `<Version>` and `<PackageVersion>` in its csproj, merge, then publish a release.
+- `.github/workflows/publish.yml` runs when a GitHub Release is published. It builds, tests and packs every library, then pushes to NuGet.org with `--skip-duplicate`, so only libraries whose `<Version>` was bumped get published. To release a library, bump `<Version>` in its csproj, merge, then publish a release.
+- Actions are pinned to commit SHAs. Dependabot (`.github/dependabot.yml`) keeps them and the NuGet packages up to date. It skips major versions of Microsoft.Data.SqlClient, because DBSchema deliberately stays on two versions.
 - Publishing uses NuGet.org trusted publishing, so there is no API key secret. `NuGet/login` exchanges the job's GitHub OIDC token for a short-lived key. The NuGet.org policy is tied to the workflow file name `publish.yml` and the `nuget` environment, so renaming either breaks publishing until the policy is updated.
 - Tests must pass on Linux as well as Windows: privileged ports such as LogServer's default 446 can't be bound without root.
 

@@ -1,0 +1,59 @@
+<Project>
+  <!--
+    Shared settings for the four library projects. The test projects under tests/ have their own
+    Directory.Build.props, which MSBuild finds first, so nothing here applies to them.
+    Each library csproj keeps only what is specific to it: PackageId, Version, Title, Description,
+    PackageReleaseNotes and its dependencies.
+  -->
+
+  <PropertyGroup>
+    <TargetFrameworks>net10.0;netstandard2.0</TargetFrameworks>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!--
+      The recommended analyzer rules. A library that has not been cleaned up yet overrides this in its
+      csproj until its own PR fixes the warnings, so master never carries a pile of warnings.
+    -->
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+  </PropertyGroup>
+
+  <!-- CI fails on any warning, so nothing new slips in. Locally they stay warnings while you work. -->
+  <PropertyGroup Condition="'$(GITHUB_ACTIONS)' == 'true'">
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <!-- Package metadata -->
+  <PropertyGroup>
+    <Authors>Scorpio Concepts</Authors>
+    <Copyright>Copyright Scorpio Concepts 2026</Copyright>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+    <PackageProjectUrl>https://github.com/ScorpioConcepts/ScorpioConcepts.Framework</PackageProjectUrl>
+    <RepositoryType>git</RepositoryType>
+    <RepositoryUrl>https://github.com/ScorpioConcepts/ScorpioConcepts.Framework.git</RepositoryUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <!-- Symbols, so stepping into the libraries works from the NuGet.org symbol server -->
+  <PropertyGroup>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+  </PropertyGroup>
+
+  <!--
+    Package validation checks that the .NET 10 and .NET Standard builds of each package expose
+    the same API. A baseline against the previous release is added after these major versions ship.
+  -->
+  <PropertyGroup>
+    <EnablePackageValidation>true</EnablePackageValidation>
+  </PropertyGroup>
+
+  <!-- Reproducible builds in CI: paths in the PDBs are normalised and Source Link points at the commit -->
+  <PropertyGroup Condition="'$(GITHUB_ACTIONS)' == 'true'">
+    <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+
+  <!-- Every library has a README.md in its folder, shipped as the package's README -->
+  <ItemGroup>
+    <None Include="$(MSBuildProjectDirectory)/README.md" Pack="true" PackagePath="/" Visible="false" />
+  </ItemGroup>
+</Project>
