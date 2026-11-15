@@ -11,7 +11,7 @@ namespace ScorpioConcepts.Framework.DBSchema;
 /// </summary>
 public sealed class DBSchemaDefinition
 {
-    private readonly Dictionary<string, DBTable> _tables = new();
+    private readonly Dictionary<string, DBTable> _tables = new(SqlName.Comparer);
     private readonly List<DBTable> _order = new();
 
     internal DBSchemaDefinition()
@@ -20,7 +20,7 @@ public sealed class DBSchemaDefinition
         TablesInOrder = _order.AsReadOnly();
     }
 
-    /// <summary>The tables by name.</summary>
+    /// <summary>The tables by name. Like SQL Server, the names are not case sensitive.</summary>
     public IReadOnlyDictionary<string, DBTable> Tables { get; }
 
     /// <summary>The tables in the order they were read.</summary>

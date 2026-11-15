@@ -9,7 +9,7 @@ namespace ScorpioConcepts.Framework.DBSchema;
 /// </summary>
 public sealed class DBDefaultRecords
 {
-    private readonly Dictionary<string, List<DBDefaultRecord>> _records = new();
+    private readonly Dictionary<string, List<DBDefaultRecord>> _records = new(SqlName.Comparer);
     private readonly List<string> _tables = new();
 
     /// <summary>Creates an empty set of default records.</summary>

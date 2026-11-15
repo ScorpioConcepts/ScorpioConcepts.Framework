@@ -36,9 +36,9 @@ public class JsonSchemaTests(SqlServerFixture fixture) : DatabaseTestBase(fixtur
             .ShouldBe(new[]
             {
                 "Id | int identity | NOT NULL",
-                "Name | nvarchar(50) | NOT NULL DEFAULT ('')",
+                "Name | nvarchar(50) | NOT NULL CONSTRAINT [DF_Customers_Name] DEFAULT ('')",
                 "Email | varchar(100) | NULL",
-                "Balance | decimal(10,2) | NOT NULL DEFAULT ((0))",
+                "Balance | decimal(10,2) | NOT NULL CONSTRAINT [DF_Customers_Balance] DEFAULT ((0))",
             });
         tables["Orders"].GetProperty("foreignKeys")[0].GetProperty("referencedTable").GetString().ShouldBe("Customers");
     }

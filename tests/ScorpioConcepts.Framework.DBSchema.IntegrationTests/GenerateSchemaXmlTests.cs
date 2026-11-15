@@ -50,7 +50,7 @@ public class GenerateSchemaXmlTests(SqlServerFixture fixture) : DatabaseTestBase
             .ShouldBe(new[]
             {
                 "Id | int identity | NOT NULL",
-                "Name | varchar(50) | NOT NULL DEFAULT ('')",
+                "Name | varchar(50) | NOT NULL CONSTRAINT [DF_Customers_Name] DEFAULT ('')",
                 "Email | varchar(100) | NULL",
             });
         var pk = customers.Element("primary_key")!;

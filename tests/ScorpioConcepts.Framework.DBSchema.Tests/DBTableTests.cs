@@ -103,9 +103,9 @@ public class DBTableTests
 
         var fkey = table.FindForeignKey("FK_Orders_Customers");
         fkey.ShouldNotBeNull();
-        fkey.Column.ShouldBe("CustomerId");
+        string.Join(",", fkey.Columns).ShouldBe("CustomerId");
         fkey.ReferencedTable.ShouldBe("Customers");
-        fkey.ReferencedColumn.ShouldBe("Id");
+        string.Join(",", fkey.ReferencedColumns).ShouldBe("Id");
     }
 
     [Fact]
@@ -139,6 +139,6 @@ public class DBTableTests
         table.ToString().ShouldBe("DBTable Name=Orders, Columns=1, DBPrimaryKey Name=PK_Orders, Columns=1");
         table.Columns[0].ToString().ShouldBe("DBColumn Name='Id', DataType='int', Options='NOT NULL'");
         index.ToString().ShouldBe("DBIndex Name=IX_Date, Columns=1");
-        table.ForeignKeys[0].ToString().ShouldBe("DBForeignKey Name=FK_Orders_Customers, Column=CustomerId, ReferencedTable=Customers, ReferencedColumn=Id");
+        table.ForeignKeys[0].ToString().ShouldBe("DBForeignKey Name=FK_Orders_Customers, Columns=CustomerId, ReferencedTable=Customers, ReferencedColumns=Id");
     }
 }

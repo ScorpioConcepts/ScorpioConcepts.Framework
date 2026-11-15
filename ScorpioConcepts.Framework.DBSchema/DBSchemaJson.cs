@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 
@@ -21,13 +22,14 @@ namespace ScorpioConcepts.Framework.DBSchema;
 ///         { "name": "Id", "dataType": "int identity", "options": "NOT NULL" },
 ///         { "name": "Email", "dataType": "varchar(100)", "options": "NULL" }
 ///       ],
-///       "primaryKey": { "name": "PK_Customers", "columns": [ "Id" ] },
+///       "primaryKey": { "name": "PK_Customers", "clustered": true, "columns": [ "Id" ] },
 ///       "indexes": [
 ///         { "name": "IX_Customers_Email", "clustered": false, "unique": true,
 ///           "columns": [ { "name": "Email", "descending": false } ] }
 ///       ],
 ///       "foreignKeys": [
-///         { "name": "FK_...", "column": "...", "referencedTable": "...", "referencedColumn": "..." }
+///         { "name": "FK_...", "column": "...", "referencedTable": "...", "referencedColumn": "..." },
+///         { "name": "FK_...", "columns": [ "...", "..." ], "referencedTable": "...", "referencedColumns": [ "...", "..." ] }
 ///       ],
 ///       "defaultRecords": [ { "Id": 1, "Email": null } ]
 ///     }
@@ -82,12 +84,12 @@ internal static class DBSchemaJson
                 {
                     writer.WriteStartObject("primaryKey");
                     writer.WriteString("name", table.PrimaryKey.Name);
-                    writer.WriteStartArray("columns");
-                    foreach (string keyColumn in table.PrimaryKey.Columns)
+                    if (!table.PrimaryKey.Clustered)
                     {
-                        writer.WriteStringValue(keyColumn);
+                        // Only written when it isn't the default, so existing files stay the same
+                        writer.WriteBoolean("clustered", false);
                     }
-                    writer.WriteEndArray();
+                    WriteStrings(writer, "columns", table.PrimaryKey.Columns);
                     writer.WriteEndObject();
                 }
 
@@ -121,9 +123,19 @@ internal static class DBSchemaJson
                     {
                         writer.WriteStartObject();
                         writer.WriteString("name", fkey.Name);
-                        writer.WriteString("column", fkey.Column);
-                        writer.WriteString("referencedTable", fkey.ReferencedTable);
-                        writer.WriteString("referencedColumn", fkey.ReferencedColumn);
+                        if (fkey.Columns.Count == 1)
+                        {
+                            // The original single column shape, so existing files stay the same
+                            writer.WriteString("column", fkey.Columns[0]);
+                            writer.WriteString("referencedTable", fkey.ReferencedTable);
+                            writer.WriteString("referencedColumn", fkey.ReferencedColumns[0]);
+                        }
+                        else
+                        {
+                            WriteStrings(writer, "columns", fkey.Columns);
+                            writer.WriteString("referencedTable", fkey.ReferencedTable);
+                            WriteStrings(writer, "referencedColumns", fkey.ReferencedColumns);
+                        }
                         writer.WriteEndObject();
                     }
                     writer.WriteEndArray();
@@ -150,6 +162,16 @@ internal static class DBSchemaJson
             writer.WriteEndArray();
             writer.WriteEndObject();
         }
+    }
+
+    private static void WriteStrings(Utf8JsonWriter writer, string name, IEnumerable<string> values)
+    {
+        writer.WriteStartArray(name);
+        foreach (string value in values)
+        {
+            writer.WriteStringValue(value);
+        }
+        writer.WriteEndArray();
     }
 
     private static void WriteValue(Utf8JsonWriter writer, object? value)
@@ -252,6 +274,7 @@ internal static class DBSchemaJson
             string keyContext = "the primary key of " + context;
             RequireObject(primaryKey, "The \"primaryKey\" of " + context);
             table.PrimaryKey.Name = OptionalString(primaryKey, "name", keyContext);
+            table.PrimaryKey.Clustered = OptionalBool(primaryKey, "clustered", keyContext, defaultValue: true);
             foreach (JsonElement keyColumn in OptionalArray(primaryKey, "columns", keyContext))
             {
                 table.PrimaryKey.AddColumn(ColumnName(keyColumn, keyContext));
@@ -279,10 +302,27 @@ internal static class DBSchemaJson
             RequireObject(fkey, "Each foreign key of " + context);
             string fkeyName = RequiredString(fkey, "name", "a foreign key of " + context);
             string fkeyContext = "foreign key '" + fkeyName + "' of " + context;
-            table.AddForeignKey(fkeyName,
-                RequiredString(fkey, "column", fkeyContext),
-                RequiredString(fkey, "referencedTable", fkeyContext),
-                RequiredString(fkey, "referencedColumn", fkeyContext));
+            DBForeignKey foreignKey = table.AddForeignKey(fkeyName, RequiredString(fkey, "referencedTable", fkeyContext));
+
+            // One column as "column" and "referencedColumn", or several as "columns" and "referencedColumns"
+            JsonElement ignored;
+            if (TryGetProperty(fkey, "columns", out ignored))
+            {
+                List<string> columns = OptionalArray(fkey, "columns", fkeyContext).Select(c => ColumnName(c, fkeyContext)).ToList();
+                List<string> referenced = OptionalArray(fkey, "referencedColumns", fkeyContext).Select(c => ColumnName(c, fkeyContext)).ToList();
+                if (columns.Count == 0 || columns.Count != referenced.Count)
+                {
+                    throw new FormatException("\"columns\" and \"referencedColumns\" of " + fkeyContext + " must have the same number of columns, and at least one");
+                }
+                for (int i = 0; i < columns.Count; i++)
+                {
+                    foreignKey.AddColumn(columns[i], referenced[i]);
+                }
+            }
+            else
+            {
+                foreignKey.AddColumn(RequiredString(fkey, "column", fkeyContext), RequiredString(fkey, "referencedColumn", fkeyContext));
+            }
         }
 
         foreach (JsonElement recordElement in OptionalArray(element, "defaultRecords", context))
@@ -385,12 +425,12 @@ internal static class DBSchemaJson
         return value.GetString()!;
     }
 
-    private static bool OptionalBool(JsonElement element, string name, string context)
+    private static bool OptionalBool(JsonElement element, string name, string context, bool defaultValue = false)
     {
         JsonElement value;
         if ((TryGetProperty(element, name, out value) == false) || (value.ValueKind == JsonValueKind.Null))
         {
-            return false;
+            return defaultValue;
         }
         if ((value.ValueKind != JsonValueKind.True) && (value.ValueKind != JsonValueKind.False))
         {

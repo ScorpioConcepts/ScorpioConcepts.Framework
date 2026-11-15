@@ -22,6 +22,7 @@ namespace ScorpioConcepts.Framework.DBSchema;
 public sealed partial class DBSchemaManager
 {
     private readonly ILogger _logger;
+    private SqlTransaction? _transaction;
 
     /// <summary>Creates a manager for the database that <paramref name="connection"/> connects to.</summary>
     /// <param name="connection">
@@ -81,66 +82,86 @@ public sealed partial class DBSchemaManager
     /// Compares the database with <paramref name="schema"/> and adds whatever is missing: tables (with their
     /// primary key and default records), then columns and indexes, then foreign keys.
     /// </summary>
+    /// <remarks>
+    /// Everything runs in one transaction, so if any statement fails, the database is left as it was and the
+    /// exception is thrown. Names are compared without regard to case, as SQL Server does.
+    /// </remarks>
     /// <param name="schema">The structure the database should have.</param>
     public void CheckDatabaseSchema(DBSchemaDefinition schema)
     {
         if (schema is null) throw new ArgumentNullException(nameof(schema));
 
         using (OpenConnection())
+        using (SqlTransaction transaction = Connection.BeginTransaction())
         {
-            DBSchemaDefinition database = ReadDatabase();
-
-            bool createdTables = false;
-            foreach (DBTable table in schema.TablesInOrder)
+            _transaction = transaction;
+            try
             {
-                if (!database.Tables.ContainsKey(table.Name))
+                CheckInTransaction(schema);
+                transaction.Commit();
+            }
+            finally
+            {
+                // Disposing an uncommitted transaction rolls it back
+                _transaction = null;
+            }
+        }
+    }
+
+    private void CheckInTransaction(DBSchemaDefinition schema)
+    {
+        DBSchemaDefinition database = ReadDatabase();
+
+        bool createdTables = false;
+        foreach (DBTable table in schema.TablesInOrder)
+        {
+            if (!database.Tables.ContainsKey(table.Name))
+            {
+                LogMissingTable(table.Name);
+                CreateTable(table);
+                createdTables = true;
+            }
+        }
+
+        if (createdTables)
+        {
+            database = ReadDatabase();
+        }
+
+        foreach (DBTable fileTable in schema.TablesInOrder)
+        {
+            DBTable dbTable = database.Tables[fileTable.Name];
+
+            foreach (DBColumn column in fileTable.Columns)
+            {
+                if (dbTable.FindColumn(column.Name) is null)
                 {
-                    LogMissingTable(table.Name);
-                    CreateTable(table);
-                    createdTables = true;
+                    LogMissingObject(fileTable.Name, "column", column.Name);
+                    CreateColumn(dbTable, column);
                 }
             }
 
-            if (createdTables)
+            foreach (DBIndex index in fileTable.Indexes)
             {
-                database = ReadDatabase();
-            }
-
-            foreach (DBTable fileTable in schema.TablesInOrder)
-            {
-                DBTable dbTable = database.Tables[fileTable.Name];
-
-                foreach (DBColumn column in fileTable.Columns)
+                if (dbTable.FindIndex(index.Name) is null)
                 {
-                    if (dbTable.FindColumn(column.Name) is null)
-                    {
-                        LogMissingObject(fileTable.Name, "column", column.Name);
-                        CreateColumn(dbTable, column);
-                    }
-                }
-
-                foreach (DBIndex index in fileTable.Indexes)
-                {
-                    if (dbTable.FindIndex(index.Name) is null)
-                    {
-                        LogMissingObject(fileTable.Name, "index", index.Name);
-                        CreateIndex(dbTable, index);
-                    }
+                    LogMissingObject(fileTable.Name, "index", index.Name);
+                    CreateIndex(dbTable, index);
                 }
             }
+        }
 
-            // Foreign keys last, so the tables and columns they refer to exist
-            foreach (DBTable fileTable in schema.TablesInOrder)
+        // Foreign keys last, so the tables and columns they refer to exist
+        foreach (DBTable fileTable in schema.TablesInOrder)
+        {
+            DBTable dbTable = database.Tables[fileTable.Name];
+
+            foreach (DBForeignKey foreignKey in fileTable.ForeignKeys)
             {
-                DBTable dbTable = database.Tables[fileTable.Name];
-
-                foreach (DBForeignKey foreignKey in fileTable.ForeignKeys)
+                if (dbTable.FindForeignKey(foreignKey.Name) is null)
                 {
-                    if (dbTable.FindForeignKey(foreignKey.Name) is null)
-                    {
-                        LogMissingObject(fileTable.Name, "foreign key", foreignKey.Name);
-                        CreateForeignKey(dbTable, foreignKey);
-                    }
+                    LogMissingObject(fileTable.Name, "foreign key", foreignKey.Name);
+                    CreateForeignKey(dbTable, foreignKey);
                 }
             }
         }
@@ -174,117 +195,123 @@ public sealed partial class DBSchemaManager
     {
         var schema = new DBSchemaDefinition();
 
-        var tables = new List<string>();
+        // One query per catalog view for the whole database, rather than several per table
         LogReadingTables();
-        using (var command = new SqlCommand("exec sp_tables", Connection))
-        using (SqlDataReader reader = command.ExecuteReader())
+        ReadRows("""
+            SELECT t.name
+            FROM sys.tables t
+            WHERE t.schema_id = SCHEMA_ID(N'dbo') AND t.is_ms_shipped = 0 AND t.name <> N'dtproperties'
+            ORDER BY t.name
+            """, reader => schema.AddTable(reader.GetString(0)));
+        LogFoundTables(schema.Tables.Count);
+
+        ReadRows("""
+            SELECT t.name, c.name, ty.name, c.max_length, c.precision, c.scale, c.is_nullable, c.is_identity,
+                CONVERT(nvarchar(40), ic.seed_value), CONVERT(nvarchar(40), ic.increment_value),
+                dc.name, dc.is_system_named, dc.definition, cc.definition, cc.is_persisted
+            FROM sys.columns c
+            JOIN sys.tables t ON t.object_id = c.object_id
+            JOIN sys.types ty ON ty.user_type_id = c.user_type_id
+            LEFT JOIN sys.identity_columns ic ON ic.object_id = c.object_id AND ic.column_id = c.column_id
+            LEFT JOIN sys.default_constraints dc ON dc.object_id = c.default_object_id
+            LEFT JOIN sys.computed_columns cc ON cc.object_id = c.object_id AND cc.column_id = c.column_id
+            WHERE t.schema_id = SCHEMA_ID(N'dbo') AND t.is_ms_shipped = 0
+            ORDER BY t.name, c.column_id
+            """, reader =>
         {
-            while (reader.Read())
+            if (!schema.Tables.TryGetValue(reader.GetString(0), out DBTable? table)) return;
+
+            bool nullable = reader.GetBoolean(6);
+            if (!reader.IsDBNull(13))
             {
-                string tableName = Text(reader["TABLE_NAME"]);
-                string tableOwner = Text(reader["TABLE_OWNER"]);
-                string tableType = Text(reader["TABLE_TYPE"]);
-                if (tableOwner == "dbo" && tableType == "TABLE" && tableName != "dtproperties")
-                {
-                    tables.Add(tableName);
-                }
+                // A computed column has an expression instead of a type. NULL and NOT NULL are only allowed
+                // when it is persisted.
+                bool persisted = reader.GetBoolean(14);
+                string options = persisted ? (nullable ? "PERSISTED" : "PERSISTED NOT NULL") : "";
+                table.AddColumn(reader.GetString(1), "AS " + reader.GetString(13), options);
+                return;
             }
-        }
-        LogFoundTables(tables.Count);
 
-        Version serverVersion = new Version(Connection.ServerVersion);
+            string dataType = FormatDataType(
+                reader.GetString(2), reader.GetInt16(3), reader.GetByte(4), reader.GetByte(5), reader.GetBoolean(7),
+                reader.IsDBNull(8) ? null : reader.GetString(8),
+                reader.IsDBNull(9) ? null : reader.GetString(9));
 
-        foreach (string tableName in tables)
+            string columnOptions = nullable ? "NULL" : "NOT NULL";
+            if (!reader.IsDBNull(12))
+            {
+                // Keep a default's name unless SQL Server made it up
+                if (!reader.GetBoolean(11)) columnOptions += " CONSTRAINT " + SqlName.Quote(reader.GetString(10));
+                columnOptions += " DEFAULT " + reader.GetString(12);
+            }
+
+            table.AddColumn(reader.GetString(1), dataType, columnOptions);
+        });
+
+        // The primary key and the other indexes, which are both rowstore B-tree indexes (types 1 and 2)
+        ReadRows("""
+            SELECT t.name, i.name, i.is_primary_key, i.type_desc, i.is_unique, c.name, ic.is_descending_key
+            FROM sys.indexes i
+            JOIN sys.tables t ON t.object_id = i.object_id
+            JOIN sys.index_columns ic ON ic.object_id = i.object_id AND ic.index_id = i.index_id
+            JOIN sys.columns c ON c.object_id = ic.object_id AND c.column_id = ic.column_id
+            WHERE t.schema_id = SCHEMA_ID(N'dbo') AND t.is_ms_shipped = 0
+                AND i.type IN (1, 2) AND i.is_hypothetical = 0 AND ic.is_included_column = 0
+            ORDER BY t.name, i.name, ic.key_ordinal
+            """, reader =>
         {
-            LogReadingTable(tableName);
-            DBTable table = schema.AddTable(tableName);
-            string qualifiedName = "[dbo].[" + tableName + "]";
+            if (!schema.Tables.TryGetValue(reader.GetString(0), out DBTable? table)) return;
 
-            const string columnsSql = """
-                SELECT c.name, t.name AS type_name, c.max_length, c.precision, c.scale,
-                    c.is_nullable, c.is_identity, dc.definition AS default_definition
-                FROM sys.columns c
-                JOIN sys.types t ON (t.user_type_id = c.user_type_id)
-                LEFT JOIN sys.default_constraints dc ON (dc.object_id = c.default_object_id)
-                WHERE c.object_id = OBJECT_ID(@table)
-                ORDER BY c.column_id
-                """;
-            using (var command = new SqlCommand(columnsSql, Connection))
+            string indexName = reader.GetString(1);
+            bool clustered = reader.GetString(3) == "CLUSTERED";
+            if (reader.GetBoolean(2))
             {
-                command.Parameters.AddWithValue("@table", qualifiedName);
-                using SqlDataReader reader = command.ExecuteReader();
-                while (reader.Read())
-                {
-                    string columnType = FormatDataType(
-                        reader.GetString(1),
-                        reader.GetInt16(2),
-                        reader.GetByte(3),
-                        reader.GetByte(4),
-                        reader.GetBoolean(6));
-                    string columnOptions = reader.GetBoolean(5) ? "NULL" : "NOT NULL";
-                    if (!reader.IsDBNull(7))
-                    {
-                        columnOptions += " DEFAULT " + reader.GetString(7);
-                    }
-
-                    table.AddColumn(reader.GetString(0), columnType, columnOptions);
-                }
+                table.PrimaryKey.Name = indexName;
+                table.PrimaryKey.Clustered = clustered;
+                table.PrimaryKey.AddColumn(reader.GetString(5));
+                return;
             }
 
-            using (SqlCommand command = Command("exec sp_pkeys [" + tableName + "]"))
-            using (SqlDataReader reader = command.ExecuteReader())
-            {
-                while (reader.Read())
-                {
-                    table.PrimaryKey.Name = Text(reader["PK_NAME"]);
-                    table.PrimaryKey.AddColumn(Text(reader["COLUMN_NAME"]));
-                }
-            }
+            DBIndex index = table.FindIndex(indexName) ?? table.AddIndex(indexName, clustered, reader.GetBoolean(4));
+            index.AddColumn(reader.GetString(5), reader.GetBoolean(6));
+        });
 
-            if (serverVersion.Major > 8)
-            {
-                const string indexesSql = """
-                    SELECT idx.name AS idx_name, idx.type_desc, idx.is_unique, cols.name AS col_name, ixc.is_descending_key
-                    FROM sys.indexes idx
-                    JOIN sys.index_columns ixc ON (idx.index_id = ixc.index_id)
-                    JOIN sys.columns cols ON (ixc.column_id = cols.column_id)
-                    WHERE idx.object_id = OBJECT_ID(@table)
-                    AND ixc.object_id = idx.object_id
-                    AND cols.object_id = idx.object_id
-                    AND idx.is_primary_key = 0
-                    AND ixc.is_included_column = 0
-                    ORDER BY idx.name, ixc.key_ordinal
-                    """;
-                using var command = new SqlCommand(indexesSql, Connection);
-                command.Parameters.AddWithValue("@table", qualifiedName);
-                using SqlDataReader reader = command.ExecuteReader();
-                while (reader.Read())
-                {
-                    string indexName = reader.GetString(0);
-                    DBIndex index = table.FindIndex(indexName)
-                        ?? table.AddIndex(indexName, reader.GetString(1) == "CLUSTERED", reader.GetBoolean(2));
-                    index.AddColumn(reader.GetString(3), reader.GetBoolean(4));
-                }
-            }
+        ReadRows("""
+            SELECT t.name, fk.name, rt.name, pc.name, rc.name
+            FROM sys.foreign_keys fk
+            JOIN sys.tables t ON t.object_id = fk.parent_object_id
+            JOIN sys.tables rt ON rt.object_id = fk.referenced_object_id
+            JOIN sys.foreign_key_columns fkc ON fkc.constraint_object_id = fk.object_id
+            JOIN sys.columns pc ON pc.object_id = fkc.parent_object_id AND pc.column_id = fkc.parent_column_id
+            JOIN sys.columns rc ON rc.object_id = fkc.referenced_object_id AND rc.column_id = fkc.referenced_column_id
+            WHERE t.schema_id = SCHEMA_ID(N'dbo') AND t.is_ms_shipped = 0
+            ORDER BY t.name, fk.name, fkc.constraint_column_id
+            """, reader =>
+        {
+            if (!schema.Tables.TryGetValue(reader.GetString(0), out DBTable? table)) return;
 
-            using (SqlCommand command = Command("exec sp_fkeys @fktable_name=[" + tableName + "]"))
-            using (SqlDataReader reader = command.ExecuteReader())
-            {
-                while (reader.Read())
-                {
-                    table.AddForeignKey(
-                        Text(reader["FK_NAME"]),
-                        Text(reader["FKCOLUMN_NAME"]),
-                        Text(reader["PKTABLE_NAME"]),
-                        Text(reader["PKCOLUMN_NAME"]));
-                }
-            }
+            string keyName = reader.GetString(1);
+            DBForeignKey key = table.FindForeignKey(keyName) ?? table.AddForeignKey(keyName, reader.GetString(2));
+            key.AddColumn(reader.GetString(3), reader.GetString(4));
+        });
+
+        foreach (DBTable table in schema.TablesInOrder)
+        {
+            LogReadTable(table.Name, table.Columns.Count, table.Indexes.Count, table.ForeignKeys.Count);
         }
 
         return schema;
     }
 
-    private static string Text(object value) => Convert.ToString(value, CultureInfo.InvariantCulture) ?? "";
+    private void ReadRows(string sql, Action<SqlDataReader> readRow)
+    {
+        using SqlCommand command = Command(sql);
+        using SqlDataReader reader = command.ExecuteReader();
+        while (reader.Read())
+        {
+            readRow(reader);
+        }
+    }
 
     /// <summary>
     /// Builds a column data type, including its size, the way it would be written in a <c>CREATE TABLE</c> statement.
@@ -294,7 +321,10 @@ public sealed partial class DBSchemaManager
     /// <param name="precision">sys.columns.precision.</param>
     /// <param name="scale">sys.columns.scale.</param>
     /// <param name="isIdentity">Whether the column is an IDENTITY column.</param>
-    internal static string FormatDataType(string typeName, short maxLength, byte precision, byte scale, bool isIdentity)
+    /// <param name="identitySeed">The identity seed, if it is one. Written only when it isn't the default of 1.</param>
+    /// <param name="identityIncrement">The identity increment, if it is one. Written only when it isn't the default of 1.</param>
+    internal static string FormatDataType(string typeName, short maxLength, byte precision, byte scale, bool isIdentity,
+        string? identitySeed = null, string? identityIncrement = null)
     {
         string dataType = typeName;
         switch (typeName.ToUpperInvariant())
@@ -330,34 +360,44 @@ public sealed partial class DBSchemaManager
         if (isIdentity)
         {
             dataType += " identity";
+            string seed = identitySeed ?? "1";
+            string increment = identityIncrement ?? "1";
+            if (seed != "1" || increment != "1")
+            {
+                dataType += "(" + seed + "," + increment + ")";
+            }
         }
 
         return dataType;
     }
 
-    private static bool IsIdentity(DBColumn column) => column.DataType.EndsWith("identity", StringComparison.OrdinalIgnoreCase);
+    /// <summary>
+    /// A column definition for <c>CREATE TABLE</c> or <c>ALTER TABLE ADD</c>. A plain <c>identity</c> gets the
+    /// default seed and increment, which older SQL Server versions required to be written out.
+    /// </summary>
+    private static string ColumnDefinition(DBColumn column)
+    {
+        string dataType = column.DataType;
+        if (dataType.EndsWith("identity", StringComparison.OrdinalIgnoreCase)) dataType += "(1,1)";
+
+        string definition = SqlName.Quote(column.Name) + " " + dataType;
+        return column.Options.Length == 0 ? definition : definition + " " + column.Options;
+    }
 
     private void CreateTable(DBTable table)
     {
         LogCreatingTable(table.Name);
 
-        var sql = new StringBuilder();
-        sql.Append("CREATE TABLE [").Append(table.Name).AppendLine("] (");
-        var definitions = new List<string>();
-        foreach (DBColumn column in table.Columns)
+        var definitions = table.Columns.Select(c => "\t" + ColumnDefinition(c)).ToList();
+        if (table.PrimaryKey.Columns.Count > 0)
         {
-            definitions.Add("\t[" + column.Name + "] " + column.DataType + (IsIdentity(column) ? "(1,1)" : "") + " " + column.Options);
+            string constraint = string.IsNullOrEmpty(table.PrimaryKey.Name) ? "" : "CONSTRAINT " + SqlName.Quote(table.PrimaryKey.Name!) + " ";
+            definitions.Add("\t" + constraint + "PRIMARY KEY " + (table.PrimaryKey.Clustered ? "CLUSTERED" : "NONCLUSTERED")
+                + " (" + string.Join(", ", table.PrimaryKey.Columns.Select(c => SqlName.Quote(c) + " ASC")) + ")");
         }
 
-        if (!string.IsNullOrEmpty(table.PrimaryKey.Name))
-        {
-            definitions.Add("\tCONSTRAINT [" + table.PrimaryKey.Name + "] PRIMARY KEY CLUSTERED (" + Environment.NewLine
-                + string.Join("," + Environment.NewLine, table.PrimaryKey.Columns.Select(c => "\t\t[" + c + "] ASC"))
-                + Environment.NewLine + "\t)");
-        }
-        sql.AppendLine(string.Join("," + Environment.NewLine, definitions)).AppendLine(");");
-
-        Execute(sql.ToString());
+        Execute("CREATE TABLE " + SqlName.Table(table.Name) + " (" + Environment.NewLine
+            + string.Join("," + Environment.NewLine, definitions) + Environment.NewLine + ");");
 
         foreach (DBDefaultRecord record in table.DefaultRecords)
         {
@@ -369,17 +409,15 @@ public sealed partial class DBSchemaManager
     {
         LogInsertingDefaultRecord(table.Name);
 
+        // Positional parameters, so a column name never has to be a valid parameter name
         var values = record.OrderedValues.ToList();
-        string sql = "INSERT INTO [" + table.Name + "](" + Environment.NewLine
-            + string.Join("," + Environment.NewLine, values.Select(kvp => "\t[" + kvp.Key + "]"))
-            + Environment.NewLine + ") VALUES(" + Environment.NewLine
-            + string.Join("," + Environment.NewLine, values.Select(kvp => "\t@" + kvp.Key))
-            + Environment.NewLine + ");" + Environment.NewLine;
+        string sql = "INSERT INTO " + SqlName.Table(table.Name) + " (" + SqlName.List(values.Select(v => v.Key)) + ")"
+            + " VALUES (" + string.Join(", ", values.Select((_, i) => "@p" + i.ToString(CultureInfo.InvariantCulture))) + ");";
 
         using SqlCommand command = Command(sql);
-        foreach (KeyValuePair<string, object?> kvp in values)
+        for (int i = 0; i < values.Count; i++)
         {
-            command.Parameters.AddWithValue("@" + kvp.Key, kvp.Value ?? DBNull.Value);
+            command.Parameters.AddWithValue("@p" + i.ToString(CultureInfo.InvariantCulture), values[i].Value ?? DBNull.Value);
         }
         command.ExecuteNonQuery();
     }
@@ -388,27 +426,25 @@ public sealed partial class DBSchemaManager
     {
         LogCreating("column", column.Name, table.Name);
 
-        Execute("ALTER TABLE [" + table.Name + "] ADD " + Environment.NewLine
-            + "\t[" + column.Name + "] " + column.DataType + (IsIdentity(column) ? "(1,1)" : "") + " " + column.Options + " ;" + Environment.NewLine);
+        Execute("ALTER TABLE " + SqlName.Table(table.Name) + " ADD " + ColumnDefinition(column) + ";");
     }
 
     private void CreateIndex(DBTable table, DBIndex index)
     {
         LogCreating("index", index.Name, table.Name);
 
-        Execute("CREATE" + (index.Unique ? " UNIQUE" : "") + (index.Clustered ? " CLUSTERED" : "")
-            + " INDEX [" + index.Name + "] ON [" + table.Name + "] (" + Environment.NewLine
-            + string.Join("," + Environment.NewLine, index.Columns.Select(c => "\t[" + c.Name + "]" + (c.Descending ? " DESC" : "")))
-            + ") ;" + Environment.NewLine);
+        Execute("CREATE" + (index.Unique ? " UNIQUE" : "") + (index.Clustered ? " CLUSTERED" : " NONCLUSTERED")
+            + " INDEX " + SqlName.Quote(index.Name) + " ON " + SqlName.Table(table.Name)
+            + " (" + string.Join(", ", index.Columns.Select(c => SqlName.Quote(c.Name) + (c.Descending ? " DESC" : ""))) + ");");
     }
 
     private void CreateForeignKey(DBTable table, DBForeignKey foreignKey)
     {
         LogCreating("foreign key", foreignKey.Name, table.Name);
 
-        Execute("ALTER TABLE [" + table.Name + "] WITH CHECK ADD CONSTRAINT [" + foreignKey.Name + "]" + Environment.NewLine
-            + "\tFOREIGN KEY([" + foreignKey.Column + "])" + Environment.NewLine
-            + "\t\tREFERENCES [" + foreignKey.ReferencedTable + "] ([" + foreignKey.ReferencedColumn + "]) ;" + Environment.NewLine);
+        Execute("ALTER TABLE " + SqlName.Table(table.Name) + " WITH CHECK ADD CONSTRAINT " + SqlName.Quote(foreignKey.Name)
+            + " FOREIGN KEY (" + SqlName.List(foreignKey.Columns) + ")"
+            + " REFERENCES " + SqlName.Table(foreignKey.ReferencedTable) + " (" + SqlName.List(foreignKey.ReferencedColumns) + ");");
     }
 
     private void Execute(string sql)
@@ -417,8 +453,9 @@ public sealed partial class DBSchemaManager
         command.ExecuteNonQuery();
     }
 
-    // Identifiers come from the schema file or the database itself, and values are always parameters
-    private SqlCommand Command(string sql) => new(sql, Connection);
+    // Identifiers are always quoted with SqlName, and values are always parameters. Only a column's DataType and
+    // Options are written as they are, because they are SQL: a schema file is code.
+    private SqlCommand Command(string sql) => new(sql, Connection) { Transaction = _transaction };
 
     [LoggerMessage(Level = LogLevel.Debug, Message = "Reading database tables")]
     private partial void LogReadingTables();
@@ -426,8 +463,8 @@ public sealed partial class DBSchemaManager
     [LoggerMessage(Level = LogLevel.Debug, Message = "Found {Count} tables")]
     private partial void LogFoundTables(int count);
 
-    [LoggerMessage(Level = LogLevel.Debug, Message = "Reading the structure of table '{Table}'")]
-    private partial void LogReadingTable(string table);
+    [LoggerMessage(Level = LogLevel.Debug, Message = "Table '{Table}' has {Columns} columns, {Indexes} indexes and {ForeignKeys} foreign keys")]
+    private partial void LogReadTable(string table, int columns, int indexes, int foreignKeys);
 
     [LoggerMessage(Level = LogLevel.Information, Message = "Writing the schema as {Format} to '{File}'")]
     private partial void LogWritingSchemaFile(DBSchemaFormat format, string file);

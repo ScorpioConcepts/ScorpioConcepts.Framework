@@ -86,7 +86,7 @@ public sealed class SchemaJsonTests : IDisposable
         });
 
         var fkey = schema.Tables["Orders"].ForeignKeys.ShouldHaveSingleItem();
-        (fkey.Name, fkey.Column, fkey.ReferencedTable, fkey.ReferencedColumn).ShouldBe(("FK_Orders_Customers", "CustomerId", "Customers", "Id"));
+        (fkey.Name, string.Join(",", fkey.Columns), fkey.ReferencedTable, string.Join(",", fkey.ReferencedColumns)).ShouldBe(("FK_Orders_Customers", "CustomerId", "Customers", "Id"));
     }
 
     [Fact]
@@ -249,8 +249,8 @@ internal static class SchemaAssert
             a.PrimaryKey.Columns.ShouldBe(e.PrimaryKey.Columns);
             a.Indexes.Select(i => (i.Name, i.Clustered, i.Unique, string.Join(",", i.Columns)))
                 .ShouldBe(e.Indexes.Select(i => (i.Name, i.Clustered, i.Unique, string.Join(",", i.Columns))));
-            a.ForeignKeys.Select(f => (f.Name, f.Column, f.ReferencedTable, f.ReferencedColumn))
-                .ShouldBe(e.ForeignKeys.Select(f => (f.Name, f.Column, f.ReferencedTable, f.ReferencedColumn)));
+            a.ForeignKeys.Select(f => (f.Name, string.Join(",", f.Columns), f.ReferencedTable, string.Join(",", f.ReferencedColumns)))
+                .ShouldBe(e.ForeignKeys.Select(f => (f.Name, string.Join(",", f.Columns), f.ReferencedTable, string.Join(",", f.ReferencedColumns))));
         }
     }
 }

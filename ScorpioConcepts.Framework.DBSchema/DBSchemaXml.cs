@@ -45,6 +45,11 @@ internal static class DBSchemaXml
             {
                 writer.WriteStartElement("primary_key");
                 writer.WriteAttributeString("name", table.PrimaryKey.Name);
+                if (!table.PrimaryKey.Clustered)
+                {
+                    // Only written when it isn't the default, so existing files stay the same
+                    writer.WriteAttributeString("clustered", "False");
+                }
                 foreach (string keyColumn in table.PrimaryKey.Columns)
                 {
                     writer.WriteStartElement("column");
@@ -74,9 +79,24 @@ internal static class DBSchemaXml
             {
                 writer.WriteStartElement("foreign_key");
                 writer.WriteAttributeString("name", foreignKey.Name);
-                writer.WriteAttributeString("column", foreignKey.Column);
-                writer.WriteAttributeString("pk_table", foreignKey.ReferencedTable);
-                writer.WriteAttributeString("pk_column", foreignKey.ReferencedColumn);
+                if (foreignKey.Columns.Count == 1)
+                {
+                    // The original single column shape, so existing files stay the same
+                    writer.WriteAttributeString("column", foreignKey.Columns[0]);
+                    writer.WriteAttributeString("pk_table", foreignKey.ReferencedTable);
+                    writer.WriteAttributeString("pk_column", foreignKey.ReferencedColumns[0]);
+                }
+                else
+                {
+                    writer.WriteAttributeString("pk_table", foreignKey.ReferencedTable);
+                    for (int i = 0; i < foreignKey.Columns.Count; i++)
+                    {
+                        writer.WriteStartElement("column");
+                        writer.WriteAttributeString("name", foreignKey.Columns[i]);
+                        writer.WriteAttributeString("pk_column", foreignKey.ReferencedColumns[i]);
+                        writer.WriteEndElement();
+                    }
+                }
                 writer.WriteEndElement();
             }
 
@@ -256,17 +276,47 @@ internal static class DBSchemaXml
     private static void ReadForeignKey(XmlReader reader, DBTable table)
     {
         string context = "a <foreign_key> in table '" + table.Name + "'";
-        table.AddForeignKey(
-            RequiredAttribute(reader, "name", context),
-            RequiredAttribute(reader, "column", context),
-            RequiredAttribute(reader, "pk_table", context),
-            RequiredAttribute(reader, "pk_column", context));
-        EndElement(reader, "foreign_key");
+        DBForeignKey foreignKey = table.AddForeignKey(RequiredAttribute(reader, "name", context), RequiredAttribute(reader, "pk_table", context));
+
+        // One column as column="..." pk_column="...", or several as <column name="..." pk_column="..." /> children
+        string? column = reader.GetAttribute("column");
+        if (column is not null)
+        {
+            foreignKey.AddColumn(column, RequiredAttribute(reader, "pk_column", context));
+        }
+
+        if (reader.IsEmptyElement)
+        {
+            reader.Read();
+        }
+        else
+        {
+            reader.ReadStartElement();
+            while (reader.NodeType == XmlNodeType.Element)
+            {
+                if (reader.Name == "column")
+                {
+                    foreignKey.AddColumn(RequiredAttribute(reader, "name", "a column of " + context), RequiredAttribute(reader, "pk_column", "a column of " + context));
+                    EndElement(reader, "column");
+                }
+                else
+                {
+                    reader.Skip();
+                }
+            }
+            reader.ReadEndElement();
+        }
+
+        if (foreignKey.Columns.Count == 0)
+        {
+            throw new FormatException("Foreign key '" + foreignKey.Name + "' in table '" + table.Name + "' has no columns");
+        }
     }
 
     private static void ReadPrimaryKey(XmlReader reader, DBTable table)
     {
         table.PrimaryKey.Name = reader.GetAttribute("name");
+        table.PrimaryKey.Clustered = reader.GetAttribute("clustered") is not string clustered || bool.Parse(clustered);
         if (reader.IsEmptyElement)
         {
             reader.Read();
