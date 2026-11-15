@@ -18,6 +18,10 @@
     <RepositoryUrl>https://github.com/ScorpioConcepts/ScorpioConcepts.Framework.git</RepositoryUrl>
   </PropertyGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="ScorpioConcepts.Framework.DBSchema.Tests" />
+  </ItemGroup>
+
   <!-- Microsoft.Data.SqlClient 6.0+ no longer ships a .NET Standard build, so netstandard2.0 stays on the 5.2 line -->
   <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
     <PackageReference Include="Microsoft.Data.SqlClient" Version="7.1.2" />

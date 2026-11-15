@@ -1,4 +1,11 @@
 <Solution>
+  <Folder Name="/tests/">
+    <Project Path="tests/ScorpioConcepts.Framework.DBSchema.IntegrationTests/ScorpioConcepts.Framework.DBSchema.IntegrationTests.csproj" />
+    <Project Path="tests/ScorpioConcepts.Framework.DBSchema.Tests/ScorpioConcepts.Framework.DBSchema.Tests.csproj" />
+    <Project Path="tests/ScorpioConcepts.Framework.LogServer.Tests/ScorpioConcepts.Framework.LogServer.Tests.csproj" />
+    <Project Path="tests/ScorpioConcepts.Framework.netNUTClient.Tests/ScorpioConcepts.Framework.netNUTClient.Tests.csproj" />
+    <Project Path="tests/ScorpioConcepts.Framework.PlugIn.Tests/ScorpioConcepts.Framework.PlugIn.Tests.csproj" />
+  </Folder>
   <Project Path="ScorpioConcepts.Framework.DBSchema/ScorpioConcepts.Framework.DBSchema.csproj" />
   <Project Path="ScorpioConcepts.Framework.LogServer/ScorpioConcepts.Framework.LogServer.csproj" />
   <Project Path="ScorpioConcepts.Framework.netNUTClient/ScorpioConcepts.Framework.netNUTClient.csproj" />

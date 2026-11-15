@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="../../ScorpioConcepts.Framework.netNUTClient/ScorpioConcepts.Framework.netNUTClient.csproj" />
+  </ItemGroup>
+
+</Project>

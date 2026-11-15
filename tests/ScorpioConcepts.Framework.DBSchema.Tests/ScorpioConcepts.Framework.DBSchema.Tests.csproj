@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="../../ScorpioConcepts.Framework.DBSchema/ScorpioConcepts.Framework.DBSchema.csproj" />
+  </ItemGroup>
+
+</Project>

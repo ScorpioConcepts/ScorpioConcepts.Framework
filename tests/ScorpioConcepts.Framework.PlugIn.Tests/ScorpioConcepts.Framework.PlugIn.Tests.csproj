@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="../../ScorpioConcepts.Framework.PlugIn/ScorpioConcepts.Framework.PlugIn.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Used to compile sample plugin assemblies on the fly for PlugInManager tests -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" />
+  </ItemGroup>
+
+</Project>

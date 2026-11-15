@@ -8,8 +8,6 @@ A collection of independent, small .NET class libraries, each shipped as its own
 
 ## Build and packaging
 
-There is no test project in this repository.
-
 All four projects are SDK-style and multi-target `net10.0;netstandard2.0` (.NET Framework is not supported). The solution uses the XML `.slnx` format, which needs the .NET 10 SDK or Visual Studio 2022 17.13+.
 
 ```
@@ -21,6 +19,22 @@ dotnet pack  ScorpioConcepts.Framework.slnx -c Release
 Package metadata lives in each csproj (there are no `.nuspec` or `AssemblyInfo.cs` files). When releasing, bump both `<Version>` and `<PackageVersion>` and update `<PackageReleaseNotes>`. Every change must still compile for `netstandard2.0`, so avoid APIs that only exist in newer .NET, and C# features that need runtime support netstandard2.0 lacks.
 
 DBSchema uses `Microsoft.Data.SqlClient`, with a different version per target: 7.x for `net10.0` and 5.2.x for `netstandard2.0`, because 6.0 and later no longer ship a .NET Standard build. Keep the conditional `PackageReference` groups in its csproj when updating them.
+
+## Tests
+
+Tests live in `tests/`, one project per library, using xUnit v3 with Shouldly for assertions and NSubstitute for mocks. Package versions are managed centrally in `tests/Directory.Packages.props`, and shared settings live in `tests/Directory.Build.props`. `global.json` opts `dotnet test` into Microsoft.Testing.Platform, so pass the project with `--project` and select tests with the xUnit filter options:
+
+```
+dotnet test ScorpioConcepts.Framework.slnx
+dotnet test --project tests/ScorpioConcepts.Framework.LogServer.Tests
+dotnet test --project tests/ScorpioConcepts.Framework.LogServer.Tests --filter-method "*New_client_receives_greeting_then_history"
+```
+
+- **DBSchema.IntegrationTests** start SQL Server in Docker through Testcontainers, using one container per run and a fresh database per test. They run serially (see `xunit.runner.json`) because `DBSchema` holds its connection statically. If Docker isn't running, they are skipped instead of failing.
+- **DBSchema.Tests** reach the XML reader/writer through `InternalsVisibleTo`, so no database is needed.
+- **PlugIn.Tests** compile throwaway plugin DLLs with Roslyn (`PlugInCompiler`). Each one gets a unique assembly name, because the default load context can only hold one assembly per name.
+- **LogServer.Tests** and **netNUTClient.Tests** use real sockets on loopback. netNUTClient talks to a scripted `FakeUpsdServer`. Every `UPSDClient` call goes through `RunWithTimeout`, because the client can spin forever on an unexpected reply.
+- Tests marked `[Fact(Skip = "Known bug: ...")]` describe confirmed bugs in the libraries. When you fix one, remove its `Skip`.
 
 ## Architecture
 

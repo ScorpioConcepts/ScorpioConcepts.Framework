@@ -56,6 +56,14 @@ namespace ScorpioConcepts.Framework.DBSchema
 
             DBSchema dbSchema = populateDBSchema();
 
+            WriteSchemaXML(dbSchema, targetFile, defaultRecords);
+        }
+
+        /// <summary>
+        /// Write the given Database Schema, along with the given default records, to an XML file
+        /// </summary>
+        internal static void WriteSchemaXML(DBSchema dbSchema, string targetFile, DBDefaultRecords defaultRecords)
+        {
             XmlWriterSettings settings = new XmlWriterSettings();
             settings.Indent = true;
             settings.NewLineChars = Environment.NewLine;
@@ -377,7 +385,7 @@ namespace ScorpioConcepts.Framework.DBSchema
             return dbSchema;
         }
 
-        private static DBSchema populateXMLSchema(string schemaXMLFile)
+        internal static DBSchema populateXMLSchema(string schemaXMLFile)
         {
             DBSchema xmlSchema = new DBSchema();
 
@@ -633,7 +641,7 @@ namespace ScorpioConcepts.Framework.DBSchema
             this.Tables = new Dictionary<string, DBTable>();
         }
 
-        private DBTable AddTable(string tableName)
+        internal DBTable AddTable(string tableName)
         {
             if (this.Tables.ContainsKey(tableName) == true)
             {
