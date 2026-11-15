@@ -29,7 +29,7 @@ Every change must still compile for `netstandard2.0`.
 - `LangVersion` is `latest` everywhere, so modern syntax works on both targets. A feature that needs runtime support fails to compile for `netstandard2.0`.
 - APIs that only exist in newer .NET need `#if NET`.
 - The analyzer rules that only suggest such APIs (CA1510, CA1835, CA1865 and so on) are turned off in `Directory.Build.props`.
-- A library with `<Nullable>enable</Nullable>` has nullable-annotated public APIs. netNUTClient has it now; the others get it in their own PRs.
+- A library with `<Nullable>enable</Nullable>` has nullable-annotated public APIs. netNUTClient, LogServer and PlugIn have it now; DBSchema gets it in its own PR.
 
 DBSchema uses `Microsoft.Data.SqlClient`, with a different version per target: 7.x for `net10.0` and 5.2.x for `netstandard2.0`, because 6.0 and later no longer ship a .NET Standard build. Keep the conditional `PackageReference` groups in its csproj when updating them.
 
@@ -45,7 +45,7 @@ dotnet test --project tests/ScorpioConcepts.Framework.LogServer.Tests --filter-m
 
 - **DBSchema.IntegrationTests** start SQL Server in Docker through Testcontainers, using one container per run and a fresh database per test. They run serially (see `xunit.runner.json`) because `DBSchema` holds its connection statically. If Docker isn't running, they are skipped instead of failing.
 - **DBSchema.Tests** reach the JSON and XML readers and writers through `InternalsVisibleTo`, so no database is needed. They also run serially, because `DBSchema.DebugLog` is a shared static list.
-- **PlugIn.Tests** compile throwaway plugin DLLs with Roslyn (`PlugInCompiler`). Each one gets a unique assembly name, because the default load context can only hold one assembly per name.
+- **PlugIn.Tests** compile throwaway plugin DLLs with Roslyn (`PlugInCompiler`). Each one gets a unique assembly name unless a test passes one, such as two folders that each ship a `PlugInHelper.dll` to check that plugins get their own copy.
 - **LogServer.Tests** and **netNUTClient.Tests** use real sockets on loopback. netNUTClient talks to a scripted `FakeUpsdServer`. Every `UPSDClient` call goes through `RunWithTimeout`, so a regression in `ReplyTimeout` handling fails the test instead of hanging the run.
 - Every test is expected to run and pass. Don't merge a test that is skipped to work around a bug; fix the bug in the same change.
 
@@ -65,7 +65,9 @@ dotnet test --project tests/ScorpioConcepts.Framework.LogServer.Tests --filter-m
   - **One lock:** `logLock` covers both `Log()` and adding a client with its history, so a client gets every line exactly once.
   - **Limits:** `MaxClients` refuses extra connections. `MaxQueuedLines` drops a slow client's oldest lines and tells it how many it missed.
   - **Events and shutdown:** errors are raised through `ServerError`, and connects and disconnects through `ClientConnected` and `ClientDisconnected`, all `EventHandler<T>`. Shut down with `Dispose()`, or `Stop()` then `Join()`.
-- **PlugIn**: generic `PlugInManager<TPlugIn, THost>` where `TPlugIn : IPlugIn<THost>` and `THost : IPlugInHost`. `Find(dir)` loads every top-level `*.dll` with `Assembly.LoadFrom`, makes an instance of each non-abstract type that implements the plugin interface (via `Activator.CreateInstance`, so it needs a parameterless constructor), and calls `Initialize(host)`. Exceptions go to `host.ThrowException` instead of being thrown.
+- **PlugIn**: generic `PlugInManager<TPlugIn, THost>` where `TPlugIn : IPlugIn<THost>` and `THost : IPlugInHost`. `Find(dir)` loads every top-level `*.dll`, makes an instance of each public, non-abstract type that is a `TPlugIn` (via `Activator.CreateInstance`, so it needs a parameterless constructor), calls `Initialize(host)`, and swaps in a new read-only `PlugIns` list.
+  - **Loading:** on .NET 10 each DLL gets its own `PlugInLoadContext` (`#if NET`), which loads the plugin's dependencies from its folder but always shares the contract assemblies (this library, the assemblies of `TPlugIn` and `THost`, and their references) so the interface types match. netstandard2.0 uses `Assembly.LoadFrom`. A manager loads each DLL once and reuses it on the next `Find`.
+  - **Errors:** nothing is thrown. Each failing DLL, missing dependency (`ReflectionTypeLoadException`, using the types that did load) or failing type goes to `host.ThrowException` as a `PlugInLoadException` with `FilePath`, `TypeName` and the original exception inside, and the scan carries on.
 - **netNUTClient**: `UPSDClient` is a client for the NUT `upsd` text protocol (LIST, GET, SET, INSTCMD, LOGIN, STARTTLS and so on).
   - **Sync and async:** every command is async at its core (`SendLockedAsync`), and the synchronous methods call the async ones.
   - **One command at a time:** a `SemaphoreSlim` sends one command at a time, so the client is safe to share between threads.

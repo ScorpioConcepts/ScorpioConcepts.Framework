@@ -5,8 +5,7 @@
     <Version>3.0.0</Version>
     <Title>Scorpio Concepts PlugIn Framework</Title>
     <Description>A framework to allow the simple integration of plugins into any .NET application</Description>
-    <PackageReleaseNotes>Targets .NET 10 and .NET Standard 2.0. .NET Framework targets have been dropped.</PackageReleaseNotes>
-    <!-- Previous analyzer level until PR 4 fixes this library's warnings (see Directory.Build.props) -->
-    <AnalysisLevel>latest</AnalysisLevel>
+    <PackageReleaseNotes>Targets .NET 10 and .NET Standard 2.0; .NET Framework targets have been dropped. A DLL or plugin that fails to load no longer stops the scan: each failure is reported to the host as a PlugInLoadException. On .NET 10 each plugin DLL gets its own AssemblyLoadContext. PlugIns is now a read-only list, the public API has nullable annotations, and the generic type parameters are renamed to TPlugIn and THost.</PackageReleaseNotes>
+    <Nullable>enable</Nullable>
   </PropertyGroup>
 </Project>
