@@ -1,7 +1,5 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
 using System.IO;
 using System.Reflection;
 
@@ -58,6 +56,8 @@ namespace ScorpioConcepts.Framework.PlugIn
 
                     foreach (Type pluginType in pluginAssembly.GetTypes())
                     {
+                        if (pluginType.IsAbstract) { continue; }
+
                         Type testType = pluginType.GetInterface(typeInterface.FullName);
 
                         if ((pluginType.IsSubclassOf(typeInterface) == true) || (testType != null))
