@@ -23,7 +23,9 @@ Shared settings for the four libraries live in the root `Directory.Build.props`:
 - each folder's `README.md` as the package README
 - in CI only, deterministic builds and warnings as errors
 
-Each library csproj holds only `PackageId`, `Version`, `Title`, `Description`, `PackageReleaseNotes` and its dependencies. When releasing, bump `<Version>` and update `<PackageReleaseNotes>`. A library csproj that still sets `<AnalysisLevel>latest</AnalysisLevel>` hasn't had its analyzer warnings fixed yet; remove that line when you clean it up.
+Each library csproj holds only `PackageId`, `Version`, `PackageValidationBaselineVersion`, `Title`, `Description`, `PackageReleaseNotes` and its dependencies. When releasing, bump `<Version>` and update `<PackageReleaseNotes>`.
+
+`PackageValidationBaselineVersion` is the last version on NuGet.org. `dotnet pack` downloads it and fails (CP0002 and similar) if the public API breaks compared with it. A deliberate breaking change needs a major version bump, and then the baseline update after that release. After each release is published, set the baseline to the version just released. Pack needs the v3 feed (`https://api.nuget.org/v3/index.json`) to find a brand-new version, because the old v2 feed can lag behind by hours. A library csproj that still sets `<AnalysisLevel>latest</AnalysisLevel>` hasn't had its analyzer warnings fixed yet; remove that line when you clean it up.
 
 Every change must still compile for `netstandard2.0`.
 - `LangVersion` is `latest` everywhere, so modern syntax works on both targets. A feature that needs runtime support fails to compile for `netstandard2.0`.
