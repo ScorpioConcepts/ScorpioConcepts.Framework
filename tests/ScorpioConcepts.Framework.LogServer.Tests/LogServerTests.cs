@@ -384,8 +384,9 @@ public sealed class LogServerTests : IDisposable
     }
 
     [Fact]
-    public async Task Survives_many_clients_connecting_and_disconnecting()
+    public void Survives_many_clients_connecting_and_disconnecting()
     {
+        const int clientCount = 40;
         var errors = new ConcurrentQueue<Exception>();
         var disconnected = 0;
         var server = StartServer(greeting: "hi", configure: s =>
@@ -395,21 +396,43 @@ public sealed class LogServerTests : IDisposable
         });
         int port = PortOf(server);
 
-        using var stop = new CancellationTokenSource();
-        var logger = Task.Run(() =>
+        // Busy logging, in bursts like a real application, while clients come and go. Dedicated threads
+        // keep the logger and the blocking test clients off the thread pool the server runs on: a tight
+        // logging loop and synchronous reads on pool threads starved it on a loaded CI runner.
+        using var stop = new ManualResetEventSlim();
+        var logger = new Thread(() =>
         {
-            while (!stop.IsCancellationRequested) server.Log("busy");
-        }, TestContext.Current.CancellationToken);
-
-        Parallel.For(0, 40, new ParallelOptions { MaxDegreeOfParallelism = 8 }, _ =>
-        {
-            using var client = new LogClient(port);
-            client.ReadLines(1);
+            while (!stop.IsSet)
+            {
+                for (int i = 0; i < 50; i++) server.Log("busy");
+                Thread.Sleep(1);
+            }
         });
+        logger.Start();
 
-        Wait.Until(() => Volatile.Read(ref disconnected) == 40, "every client has disconnected");
-        stop.Cancel();
-        await logger.WaitAsync(Wait.Timeout, TestContext.Current.CancellationToken);
+        var clientErrors = new ConcurrentQueue<Exception>();
+        var clients = Enumerable.Range(0, 8).Select(t => new Thread(() =>
+        {
+            try
+            {
+                for (int i = t; i < clientCount; i += 8)
+                {
+                    using var client = new LogClient(port);
+                    client.ReadLines(1);
+                }
+            }
+            catch (Exception ex)
+            {
+                clientErrors.Enqueue(ex);
+            }
+        })).ToList();
+        clients.ForEach(c => c.Start());
+        clients.ForEach(c => c.Join(TimeSpan.FromSeconds(30)).ShouldBeTrue("each client thread should finish"));
+        clientErrors.ShouldBeEmpty();
+
+        Wait.Until(() => Volatile.Read(ref disconnected) == clientCount, "every client has disconnected");
+        stop.Set();
+        logger.Join(Wait.Timeout).ShouldBeTrue("the logger should stop");
 
         errors.ShouldBeEmpty();
         server.Active.ShouldBeTrue();
