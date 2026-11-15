@@ -21,7 +21,7 @@ A library for connecting to upsd servers from the [NUT project](http://www.netwo
 _See the documentation in the folder for more details if you are interested in using it._
 
 ## 4. ScorpioConcepts.Framework.DBSchema
-This is a project I have been working on a long time. The tl;dr version is it's a library where you define your database structure in a JSON file (or, for existing schemas, an XML file), and this library will automatically ensure that your actual database matches it. If you need to add a column, simply define it in the schema file, and when you run the app, this
+This is a project I have been working on a long time. The tl;dr version is it's a library where you define your database structure in a JSON or DBML file (or, for existing schemas, an XML file), and this library will automatically ensure that your actual database matches it. If you need to add a column, simply define it in the schema file, and when you run the app, this
 library will compare the actual database with what the schema file says, and make any structural changes required. Create a `DBSchemaManager` for each database, with an optional `ILogger` to see what it changes. This is NOT a ORM library, or something like Entity Framework. It only deals in the structure of the database, not any data.
 
 _See the documentation in the folder for more details if you are interested in using it._

@@ -40,7 +40,7 @@ public sealed class DBSchemaDefinition
     }
 
     /// <summary>
-    /// Reads a schema file. Whether it is JSON or XML is worked out from its first character.
+    /// Reads a schema file. Whether it is JSON, XML or DBML is worked out from how it starts.
     /// </summary>
     /// <param name="schemaFile">The path of the schema file.</param>
     /// <exception cref="FormatException">The file is not a valid schema file.</exception>
@@ -58,6 +58,7 @@ public sealed class DBSchemaDefinition
         {
             DBSchemaFormat.Json => DBSchemaJson.Read(schemaFile),
             DBSchemaFormat.Xml => DBSchemaXml.Read(schemaFile),
+            DBSchemaFormat.Dbml => DBSchemaDbml.Read(schemaFile),
             _ => throw new ArgumentOutOfRangeException(nameof(format), format, "Unknown schema format"),
         };
     }
@@ -78,6 +79,9 @@ public sealed class DBSchemaDefinition
                 break;
             case DBSchemaFormat.Xml:
                 DBSchemaXml.Write(this, targetFile);
+                break;
+            case DBSchemaFormat.Dbml:
+                DBSchemaDbml.Write(this, targetFile);
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(format), format, "Unknown schema format");
@@ -102,27 +106,63 @@ public sealed class DBSchemaDefinition
         }
     }
 
+    /// <summary>The words a DBML file can start with.</summary>
+    private static readonly string[] DbmlKeywords =
+    {
+        "table", "ref", "records", "project", "note", "tablegroup", "tablepartial", "enum", "diagramview", "metadata", "use", "reuse",
+    };
+
     /// <summary>
-    /// Works out whether a schema file is JSON or XML from its first non-whitespace character.
+    /// Works out whether a schema file is JSON, XML or DBML from how it starts, after any whitespace and
+    /// <c>//</c> or <c>/* */</c> comments (both JSON and DBML files can start with a comment).
     /// </summary>
-    /// <exception cref="FormatException">The file starts with neither <c>{</c> nor <c>&lt;</c>.</exception>
+    /// <exception cref="FormatException">The file starts with neither <c>{</c>, <c>&lt;</c> nor a DBML keyword.</exception>
     public static DBSchemaFormat DetectFormat(string schemaFile)
     {
         if (schemaFile is null) throw new ArgumentNullException(nameof(schemaFile));
 
+        string text;
         // StreamReader skips a byte order mark, so the first character read is real content
         using (var reader = new StreamReader(schemaFile, Encoding.UTF8, true))
         {
-            int c;
-            while ((c = reader.Read()) != -1)
+            text = reader.ReadToEnd();
+        }
+
+        int i = 0;
+        while (i < text.Length)
+        {
+            if (char.IsWhiteSpace(text[i]))
             {
-                if (char.IsWhiteSpace((char)c)) continue;
-                if (c == '{') return DBSchemaFormat.Json;
-                if (c == '<') return DBSchemaFormat.Xml;
+                i++;
+            }
+            else if (string.CompareOrdinal(text, i, "//", 0, 2) == 0)
+            {
+                int end = text.IndexOf('\n', i);
+                i = end == -1 ? text.Length : end + 1;
+            }
+            else if (string.CompareOrdinal(text, i, "/*", 0, 2) == 0)
+            {
+                int end = text.IndexOf("*/", i + 2, StringComparison.Ordinal);
+                i = end == -1 ? text.Length : end + 2;
+            }
+            else
+            {
                 break;
             }
         }
 
-        throw new FormatException("'" + schemaFile + "' is not a JSON or XML schema file");
+        if (i < text.Length)
+        {
+            if (text[i] == '{') return DBSchemaFormat.Json;
+            if (text[i] == '<') return DBSchemaFormat.Xml;
+            // DBML front matter
+            if (i == 0 && text.StartsWith("---", StringComparison.Ordinal)) return DBSchemaFormat.Dbml;
+
+            int wordEnd = i;
+            while (wordEnd < text.Length && char.IsLetter(text[wordEnd])) wordEnd++;
+            if (Array.IndexOf(DbmlKeywords, text.Substring(i, wordEnd - i).ToLowerInvariant()) >= 0) return DBSchemaFormat.Dbml;
+        }
+
+        throw new FormatException("'" + schemaFile + "' is not a JSON, XML or DBML schema file");
     }
 }

@@ -116,16 +116,6 @@ public class JsonSchemaTests(SqlServerFixture fixture) : DatabaseTestBase(fixtur
             .ShouldBe(new[] { (1, "Walk-in customer", true) });
     }
 
-    private static string FindRepoFile(string relativePath)
-    {
-        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
-        {
-            string candidate = Path.Combine(dir.FullName, relativePath);
-            if (File.Exists(candidate)) return candidate;
-        }
-        throw new FileNotFoundException("Could not find " + relativePath + " above " + AppContext.BaseDirectory);
-    }
-
     [Fact]
     public void Adds_missing_columns_from_json_to_an_existing_table()
     {

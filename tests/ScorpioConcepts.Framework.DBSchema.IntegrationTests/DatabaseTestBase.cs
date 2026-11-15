@@ -52,6 +52,16 @@ public abstract class DatabaseTestBase(SqlServerFixture fixture) : IAsyncLifetim
         return path;
     }
 
+    protected static string FindRepoFile(string relativePath)
+    {
+        for (var dir = new DirectoryInfo(AppContext.BaseDirectory); dir is not null; dir = dir.Parent)
+        {
+            string candidate = Path.Combine(dir.FullName, relativePath);
+            if (File.Exists(candidate)) return candidate;
+        }
+        throw new FileNotFoundException("Could not find " + relativePath + " above " + AppContext.BaseDirectory);
+    }
+
     protected void Execute(string sql) => Execute(Connection, sql);
 
     protected static void Execute(SqlConnection connection, string sql)

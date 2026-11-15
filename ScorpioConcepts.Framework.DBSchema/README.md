@@ -43,7 +43,7 @@ var schema = new DBSchemaManager(connection, loggerFactory.CreateLogger<DBSchema
 `Indexes`, `ForeignKeys` and `DefaultRecords`, and a `PrimaryKey`.
 
 ```csharp
-DBSchemaDefinition fromFile = DBSchemaDefinition.Load("schema.json");   // JSON or XML, detected from the content
+DBSchemaDefinition fromFile = DBSchemaDefinition.Load("schema.json");   // JSON, XML or DBML, detected from the content
 DBSchemaDefinition fromDatabase = schema.ReadDatabaseSchema();
 
 foreach (DBTable table in fromFile.TablesInOrder)
@@ -112,6 +112,62 @@ New schema files are written as JSON. Only a table's `name` and its `columns` ar
 - Default records are inserted only when their table is created. Their values keep their JSON types: strings, numbers, `true`/`false` and `null`.
 - Property names are not case sensitive. Comments, trailing commas and unknown properties are allowed.
 
+## DBML schema files
+Schemas can also be written in [DBML](https://dbml.dbdiagram.io), the language used by [dbdiagram.io](https://dbdiagram.io),
+so the same file can draw a diagram of the database and keep the database in sync. This is the JSON example above in DBML:
+
+```dbml
+Table Customers {
+  Id int [pk, increment, not null]
+  Name nvarchar(50) [not null, default: '']
+  Email varchar(100)
+
+  indexes {
+    (Email) [name: 'IX_Customers_Email', unique]
+  }
+
+  records (Name, Email) {
+    'Walk-in customer', null
+  }
+}
+
+Table Orders {
+  Id int [pk, increment, not null]
+  CustomerId int [not null]
+}
+
+Ref FK_Orders_Customers: Orders.CustomerId > Customers.Id
+```
+
+Write one with `schema.GenerateSchema("schema.dbml", format: DBSchemaFormat.Dbml)`, or convert an existing schema with
+`ConvertSchema`. `CheckDatabaseSchema` recognises DBML from its content, like the other formats. Files written by this
+library are valid DBML for other DBML tools too.
+
+DBML can describe more than DBSchema can create, and it has no syntax for a few things DBSchema needs, so:
+
+- **Names DBML leaves optional are generated**: `PK_<table>` for a primary key, `IX_<table>_<columns>` for an index
+  (including the unique index made for a `[unique]` column), and `FK_<table>_<columns>` for a foreign key, including
+  inline `[ref: > table.column]` settings, which cannot be named. Give an index or `Ref` a name to use your own.
+- **Foreign keys on several columns** are written as `Ref: Deliveries.(OrderId, LineNo) > OrderLines.(OrderId, LineNo)`.
+- **Clustered indexes** are named by the table, because DBML has no clustered setting for an index:
+  `Table Orders [clustered_index: 'CIX_Orders'] { ... }`. The primary key is clustered unless `clustered_index` names
+  another index, or is `false` to cluster nothing.
+- **Defaults** are plain DBML values (`default: 0`, `default: 'text'`, `default: true`) or `` `expressions` ``
+  (`` default: `getdate()` ``). They are created with the parentheses SQL Server uses, so `default: 0` becomes
+  `DEFAULT ((0))`. Name the default constraint with `default_name: 'DF_Orders_PlacedOn'`.
+- **Identity columns** are `[increment]`. Give a seed and step other than 1 with `identity_seed: 1000, identity_increment: 5`.
+- **Computed columns** have their expression as a quoted type, with `persisted: true` if it is stored:
+  `Total "AS ([Qty]*[Price])" [persisted: true]`.
+- **Records** are default records. As in other DBML tools, `null` or an empty field inserts NULL. Write `` `DEFAULT` `` to
+  leave a column out of the inserted row so it gets the column's default; other DBML tools turn it into
+  `INSERT ... VALUES (DEFAULT)`, which does the same. `[example]` records are only examples and are not inserted.
+- **Primary key and `increment` columns** are `NOT NULL` unless they say `null`.
+- **Ignored**, because they only describe a diagram: `Project`, `Note`, `TableGroup`, `DiagramView`, `Metadata`, colours,
+  notes and other custom properties.
+- **Rejected with an error**, because DBSchema cannot create them: enums, `checks`, `TablePartial`, `use` imports, tables
+  outside the `dbo` (or DBML's default `public`) schema, many-to-many (`<>`) refs, `delete`/`update` actions other than
+  `no action`, `hash` indexes, indexes on expressions, and expressions other than `` `DEFAULT` `` in records.
+
 ## A schema file is code
 Treat a schema file like source code, and only load files you trust. Every name in the file (tables, columns,
 indexes and keys) is quoted before it goes into SQL, so a name can't run SQL of its own, and default record values are
@@ -120,7 +176,7 @@ so whoever writes the file decides what SQL runs, with the permissions of the co
 from user input.
 
 ## Existing XML schema files
-The original XML format is still fully supported. `CheckDatabaseSchema` detects whether a file is JSON or XML from its content,
+The original XML format is still fully supported. `CheckDatabaseSchema` detects whether a file is JSON, XML or DBML from its content,
 so existing XML schema files keep working unchanged, and `GenerateSchema` still writes XML when asked:
 
 ```csharp
