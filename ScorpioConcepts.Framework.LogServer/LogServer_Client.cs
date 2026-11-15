@@ -45,22 +45,20 @@ namespace ScorpioConcepts.Framework.LogServer
 
         private void _exec()
         {
+            byte[] buffer = new byte[1024 * 32];
+
             while (this.terminate == false)
             {
                 try
                 {
                     if (this.client.Client.Poll(100, SelectMode.SelectRead) == true)
                     {
-                        if (this.stream.DataAvailable == false)
+                        // Anything the client sends is discarded; it is only read to drain the socket.
+                        // Readable with no data, or a zero-byte read, means the client has disconnected.
+                        if ((this.stream.DataAvailable == false) || (this.stream.Read(buffer, 0, buffer.Length) == 0))
                         {
                             this.terminate = true;
                             break;
-                        }
-                        else
-                        {
-                            byte[] buffer = new byte[1024 * 32];
-
-                            this.stream.Read(buffer, 0, buffer.Length);
                         }
                     }
 
