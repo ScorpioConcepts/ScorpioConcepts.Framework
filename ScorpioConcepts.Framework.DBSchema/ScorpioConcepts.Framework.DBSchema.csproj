@@ -16,7 +16,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="11.0.0" />
   </ItemGroup>
 
   <!-- Microsoft.Data.SqlClient 6.0+ no longer ships a .NET Standard build, so netstandard2.0 stays on the 5.2 line -->
